@@ -3,6 +3,7 @@
  */
 
 #include <ctype.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -156,11 +157,28 @@ typedef struct _lexeme {
     } value;
 } lexeme_t;
 
+bool is_keyword(lexeme_t *lex, token_t tok)
+{
+    return lex->token == tok;
+}
+
+bool is_integer(lexeme_t *lex, int val)
+{
+    return T_INTEGER == lex->token && val == (int)lex->value.number;
+}
+
+bool is_real(lexeme_t *lex, double val)
+{
+    return T_REAL == lex->token && fabs(val - lex->value.number) < 1e-16;
+}
+
+
 /* Շարայուսական վերլուծություն */
 #define BUFFER_SIZE 128
 
 typedef struct _scanner {
     FILE *source;
+    char ch;
 } scanner_t;
 
 scanner_t *create_scanner(const char *file)
@@ -172,45 +190,149 @@ scanner_t *create_scanner(const char *file)
     if( fp == NULL ) return NULL;
 
     scanner->source = fp;
+    scanner->ch = fgetc(scanner->source);
 
     return scanner;
 }
 
+bool advance(scanner_t *scanner)
+{
+    if( feof(scanner->source) )
+        return false;
+
+    scanner->ch = fgetc(scanner->source);
+    return true;
+}
+
+void retreat(scanner_t *scanner)
+{
+    ungetc(scanner->ch, scanner->source);
+}
+
+lexeme_t scan_number(scanner_t *scanner)
+{
+    int number = 0;
+    do {
+        number = number * 10 + (scanner->ch - '0');
+        advance(scanner);
+    } while( isdigit(scanner->ch) );
+    if( '.' != scanner->ch ) {
+        retreat(scanner);
+        return (lexeme_t){ .token = T_INTEGER, .value.number = number };
+    }
+
+    double k = 1;
+    advance(scanner);
+    while( isdigit(scanner->ch) ) {
+        number = number * 10 + (scanner->ch - '0');
+        k *= 10;
+        advance(scanner);
+    }
+    retreat(scanner);
+    return (lexeme_t){ .token = T_REAL, .value.number = number / k };
+}
+
+lexeme_t scan_identifier_or_name(scanner_t *scanner)
+{
+    char buffer[40] = { 0 };
+    char *p = buffer;
+    do {
+        *p = scanner->ch;
+        ++p;
+        advance(scanner);
+    } while( isalpha(scanner->ch) );
+    retreat(scanner);
+
+    if( strlen(buffer) == 1 )
+        return (lexeme_t){ .token = T_NAME, .value.name = buffer[0] };
+
+    lexeme_t kw = { .token = T_NONE };
+    if( 0 == strcmp("END", buffer) )
+        kw.token = T_END;
+    else if( 0 == strcmp("INPUT", buffer) )
+        kw.token = T_INPUT;
+    else if( 0 == strcmp("PRINT", buffer) )
+        kw.token = T_PRINT;
+    else if( 0 == strcmp("LET", buffer) )
+        kw.token = T_LET;
+    else if( 0 == strcmp("IF", buffer) )
+        kw.token = T_IF;
+    else if( 0 == strcmp("GOTO", buffer) )
+        kw.token = T_GOTO;
+    else if( 0 == strcmp("GOSUB", buffer) )
+        kw.token = T_GOSUB;
+    else if( 0 == strcmp("RETURN", buffer) )
+        kw.token = T_RETURN;
+
+    return kw;
+}
+
+// lexeme_t scan_operation(scanner_t *scanner)
+// {
+
+// }
+
 lexeme_t next_lexeme(scanner_t *scanner)
 {
-    lexeme_t lex = { .token = T_NONE };
+    while( ' ' == scanner->ch || '\t' == scanner->ch )
+        advance(scanner);
 
-    FILE *fp = scanner->source;
-    char c = fgetc(fp);
+    if( feof(scanner->source) )
+        return (lexeme_t){ .token = T_EOF };
 
-    while( isspace(c) )
-        c = fgetc(fp);
+    if( '\n' == scanner->ch ) {
+        while( '\n' == scanner->ch )
+            advance(scanner);
+        return (lexeme_t){ .token = T_EOL };
+    }
 
-    if( isdigit(c) ) {
-        int number = 0;
-        do {
-            number = number * 10 + (c - '0');
-            c = fgetc(fp);
-        } while( isdigit(c) );
-        if( '.' == c ) {
-            double k = 1;
-            while( isdigit(c = fgetc(fp)) ) {
-                number = number * 10 + (c - '0');
-                k *= 10;
+    if( isdigit(scanner->ch) ) 
+        return scan_number(scanner);
+
+    if( isalpha(scanner->ch) )
+        return scan_identifier_or_name(scanner);
+
+    // գործողություններ
+    token_t token = T_NONE;
+    switch( scanner->ch ) {
+        case '+':
+            token = T_ADD;
+            break;
+        case '-':
+            token = T_SUB;
+            break;
+        case '*':
+            token = T_MUL;
+            break;
+        case '/':
+            token = T_DIV;
+            break;
+        case '=':
+            token = T_EQ;
+            break;
+        case '>':
+            advance(scanner);
+            if( '=' == scanner->ch )
+                token = T_GE;
+            else {
+                retreat(scanner);
+                token = T_GT;
             }
-            lex.token = T_REAL;
-            lex.value.number = number / k;
-        }
-        else {
-            lex.token = T_INTEGER;
-            lex.value.number = number;
-        }
+            break;
+        case '<':
+            advance(scanner);
+            if( '=' == scanner->ch )
+                token = T_LE;
+            else if( '>' == scanner->ch )
+                token = T_NE;
+            else {
+                retreat(scanner);
+                token = T_LT;
+            }
+            break;
     }
-    else if( isalpha(c) ) {
-        
-    }
-
-    return lex;
+    advance(scanner);
+    return (lexeme_t){ .token = token };
 }
 
 typedef struct _parser {
@@ -231,12 +353,46 @@ void parse(parser_t *parser)
 }
 
 
+/* TESTS */
+#define EXPECT(a) if(!(a)) fprintf(stderr, "FAILED: %s\n", #a)
+
+void test_scanner()
+{
+    scanner_t *scanner = create_scanner("../cases/case01.bas");
+    EXPECT(scanner != NULL);
+
+    lexeme_t lex = next_lexeme(scanner);
+    EXPECT(is_integer(&lex, 10));
+
+    lex = next_lexeme(scanner);
+    EXPECT(is_keyword(&lex, T_PRINT));
+
+    lex = next_lexeme(scanner);
+    EXPECT(is_real(&lex, 3.1415));
+
+    lex = next_lexeme(scanner);
+    EXPECT(lex.token == T_EOL);
+
+    lex = next_lexeme(scanner);
+    EXPECT(is_integer(&lex, 20));
+
+    lex = next_lexeme(scanner);
+    EXPECT(is_keyword(&lex, T_END));
+
+    lex = next_lexeme(scanner);
+    EXPECT(lex.token == T_EOL);
+
+    lex = next_lexeme(scanner);
+    EXPECT(lex.token == T_EOF);
+}
+
+
+
 int main(int argc, char **argv)
 {
     printf("Tiny BASIC, 2024\n");
 
-    scanner_t *scanner = create_scanner("../cases/case01.bas");
-    next_lexeme(scanner);
+    test_scanner();
 
     return 0;
 }

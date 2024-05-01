@@ -2,7 +2,7 @@ SOURCES = basic-e.c
 
 BASIC = basic
 
-CFLAGS = -std=gnu17 -Wall
+CFLAGS = -std=gnu17 -gdwarf-2 -Wall
 
 all: $(BASIC)
 
