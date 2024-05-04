@@ -24,7 +24,9 @@ typedef struct _number {
     double value;
 } number_t;
 
-typedef struct _variable { char name; } variable_t;
+typedef struct _variable {
+    char name;
+} variable_t;
 
 typedef enum _operation {
     ADD = 0,
@@ -75,9 +77,23 @@ typedef struct _statement statement_t;
 
 typedef struct _end {} end_t;
 
+end_t *create_end()
+{
+    return malloc(sizeof(end_t));
+}
+
+
 typedef struct _input {
     variable_t **variables;
 } input_t;
+
+input_t *create_input(variable_t **vars)
+{
+    input_t *inp = malloc(sizeof(input_t));
+    // TODO: set variables
+    return inp;
+}
+
 
 typedef struct _print {
     expression_t **expressions;
@@ -144,6 +160,9 @@ typedef enum _token {
     T_GE,
     T_LT,
     T_LE,
+    T_LPAR,
+    T_RPAR,
+    T_COMMA,
     T_EOL,
     T_EOF
 } token_t;
@@ -330,10 +349,21 @@ lexeme_t next_lexeme(scanner_t *scanner)
                 token = T_LT;
             }
             break;
+        case '(':
+            token = T_LPAR;
+            break;
+        case ')':
+            token = T_RPAR;
+            break;
+        case ',':
+            token = T_COMMA;
+            break;
     }
     advance(scanner);
     return (lexeme_t){ .token = token };
 }
+
+
 
 typedef struct _parser {
     scanner_t *scanner;
@@ -347,9 +377,56 @@ parser_t *create_parser(scanner_t *scanner)
     return parser;
 }
 
+bool match(parser_t *parser, token_t expected)
+{
+    if( parser->lookehead.token == expected ) {
+        parser->lookehead = next_lexeme(parser->scanner);
+        return true;
+    }
+
+    return false;
+}
+
+end_t *parse_end(parser_t *parser)
+{
+    if( match(parser, T_END) ) return NULL;
+
+}
+
+statement_t *parse_statement(parser_t *parser)
+{
+    switch( parser->lookehead.token ) {
+        case T_END:
+            break;
+        case T_INPUT:
+            break;
+        case T_PRINT:
+            break;
+        case T_LET:
+            break;
+        case T_IF:
+            break;
+        case T_GOTO:
+            break;
+        case T_GOSUB:
+            break;
+        case T_RETURN:
+            break;
+    }
+
+    return NULL;
+}
+
+statement_t *parse_line(parser_t *parser)
+{
+    if( match(parser, T_INTEGER) ) return NULL;
+    // TODO: parse statement
+    if( match(parser, T_EOL) ) return NULL;
+}
+
 void parse(parser_t *parser)
 {
-    // TODO
+    parser->lookehead = next_lexeme(parser->scanner);
 }
 
 
