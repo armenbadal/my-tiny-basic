@@ -24,6 +24,42 @@ factor = var | number | (expression)
 #include <stdlib.h>
 #include <string.h>
 
+
+/* Դինամիկ զանգված */
+
+typedef struct _vector {
+    size_t capacity;
+    size_t count;
+    void **items;
+} vector_t;
+
+vector_t *create_vector(size_t cap)
+{
+    vector_t *vec = malloc(sizeof(vector_t));
+    vec->capacity = cap;
+    vec->count = 0;
+    vec->items = malloc(vec->capacity * sizeof(void *));
+    return vec;
+}
+
+void destroy_vector(vector_t *vec)
+{
+    free(vec->items);
+    free(vec);
+}
+
+void add_back(vector_t *vec, void *el)
+{
+    if( vec->count == vec->capacity ) {
+        vec->capacity *= 2;
+        vec->items = realloc(vec->items, vec->capacity * sizeof(void *));
+    }
+
+    ++vec->count;
+    vec->items[vec->count] = el;
+}
+
+
 /* Տվյալների կառուցվածքներ */
 
 typedef enum _expression_kind {
@@ -146,27 +182,56 @@ typedef enum _statement_kind {
 } statement_kind_t;
 
 typedef struct _statement statement_t;
-typedef void *end_t;
+
+statement_t *_create_statement(statement_kind_t kind)
+{
+    statement_t *st = malloc(sizeof(statement_t));
+    st->kind = kind;
+    return st;
+}
+
+statement_t *create_end()
+{
+    return _create_expression(END);
+}
 
 typedef struct _input {
     char *variables;
 } input_t;
 
-input_t *create_input(char *vars)
+statement_t *create_input(char *vars)
 {
-    input_t *inp = malloc(sizeof(input_t));
-    inp->variables = vars;
-    return inp;
+    statement_t *st = _create_statement(INPUT);
+    st->body.input = malloc(sizeof(input_t));
+    st->body.input->variables = vars;
+    return st;
 }
 
 typedef struct _print {
-    expression_t **expressions;
+    vector_t *expressions;
 } print_t;
+
+statement_t *create_print(vector_t *exprs)
+{
+    statement_t *st = _create_statement(PRINT);
+    st->body.print = malloc(sizeof(print_t));
+    st->body.print->expressions = exprs;
+    return st;
+}
 
 typedef struct _let {
     char variable;
     expression_t *right;
 } let_t;
+
+statement_t *create_let(char var, expression_t *expr)
+{
+    statement_t *st = _create_statement(LET);
+    st->body.let = malloc(sizeof(let_t));
+    st->body.let->variable = var;
+    st->body.let->right = expr;
+    return st;
+}
 
 typedef struct _if {
     expression_t *condition;
@@ -174,13 +239,44 @@ typedef struct _if {
     statement_t *alternative;
 } if_t;
 
+statement_t *create_if(expression_t *cond, statement_t *dec, statement_t *alt)
+{
+    statement_t *st = _create_statement(IF);
+    st->body.ifc = malloc(sizeof(if_t));
+    st->body.ifc->condition = cond;
+    st->body.ifc->decision = dec;
+    st->body.ifc->alternative = alt;
+    return st;
+}
+
 typedef struct _goto {
     expression_t *target;
 } goto_t;
 
+statement_t *create_goto(expression_t *tg)
+{
+    statement_t *st = _create_statement(GOTO);
+    st->body.gotoc = malloc(sizeof(goto_t));
+    st->body.gotoc->target = tg;
+    return st;
+}
+
 typedef struct _gosub {
     expression_t *target;
 } gosub_t;
+
+statement_t *create_gosub(expression_t *tg)
+{
+    statement_t *st = _create_statement(GOTO);
+    st->body.gosub = malloc(sizeof(gosub_t));
+    st->body.gosub->target = tg;
+    return st;
+}
+
+statement_t *create_return()
+{
+    return _create_statement(RETURN);
+}
 
 struct _statement {
     statement_kind_t kind;
@@ -478,8 +574,10 @@ result_t parse_factor(parser_t *parser)
         result_t rs = parse_expression(parser);
         if( rs.ec != P_OK )
             return rs;
-        if( !match(parser, T_RPAR) )
+        if( !match(parser, T_RPAR) ) {
+            destroy_expression(rs.item);
             return (result_t){ .item = NULL, .ec = 0x0101 };
+        }
         return rs;
     }
 
@@ -533,9 +631,13 @@ result_t parse_expression(parser_t *parser)
     return rs;
 }
 
-end_t *parse_end(parser_t *parser)
+result_t parse_end(parser_t *parser)
 {
-    if( !match(parser, T_END) ) return NULL;
+    if( !match(parser, T_END) )
+        return (result_t){ .item = NULL, .ec = 0x0102 };
+    
+    // TODO: 
+    return (result_t){ .item = NULL, .ec = P_OK };
 }
 
 statement_t *parse_statement(parser_t *parser)
@@ -621,3 +723,4 @@ int main(int argc, char **argv)
 
     return 0;
 }
+
