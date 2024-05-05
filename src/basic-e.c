@@ -1,5 +1,20 @@
 /*
  * Tiny BASIC, 2024
+
+line = number statement NL | statement NL.
+statement = PRINT expr-list
+    | IF expression relop expression THEN statement
+    | GOTO expression
+    | INPUT var-list
+    | LET var = expression
+    | GOSUB expression
+    | RETURN
+    | END
+expr-list = (string | expression) (, (string | expression) *).
+var-list = var (, var)*
+expression = (+|-|ε) term ((+|-) term)*
+term = factor ( (* | /) factor)*
+factor = var | number | (expression)
  */
 
 #include <ctype.h>
@@ -19,14 +34,6 @@ typedef enum _expression_kind {
 } expression_kind_t;
 
 typedef struct _expression expression_t;
-
-typedef struct _number {
-    double value;
-} number_t;
-
-typedef struct _variable {
-    char name;
-} variable_t;
 
 typedef enum _operation {
     ADD = 0,
@@ -55,12 +62,77 @@ typedef struct _binary {
 struct _expression {
     expression_kind_t kind;
     union {
-        number_t *number;
-        variable_t *variable;
+        double number;
+        char name;
         unary_t *unary;
         binary_t *binary;
-    } body;
+    } value;
 };
+
+expression_t *_create_expression(expression_kind_t kind)
+{
+    expression_t *ex = malloc(sizeof(expression_t));
+    ex->kind = kind;
+    return ex;
+}
+
+expression_t *create_number(double value)
+{
+    expression_t *ex = _create_expression(NUMBER);
+    ex->value.number = value;
+    return ex;
+}
+
+expression_t *create_variable(char name)
+{
+    expression_t *ex = _create_expression(VARIABLE);
+    ex->value.name = name;
+    return ex;
+}
+
+expression_t *create_unary(operation_t op, expression_t *se)
+{
+    expression_t *ex = _create_expression(UNARY);
+    ex->value.unary = malloc(sizeof(unary_t));
+    ex->value.unary->operation = op;
+    ex->value.unary->subexpr = se;
+    return ex;
+}
+
+expression_t *create_binary(operation_t op, expression_t *l, expression_t *r)
+{
+    expression_t *ex = _create_expression(BINARY);
+    ex->value.binary = malloc(sizeof(binary_t));
+    ex->value.binary->operation = op;
+    ex->value.binary->left = l;
+    ex->value.binary->right = r;
+    return ex;
+}
+
+void destroy_expression(expression_t *expr);
+
+void destroy_unary(unary_t *ue)
+{
+    destroy_expression(ue->subexpr);
+    free(ue);
+}
+
+void destroy_binary(binary_t *be)
+{
+    destroy_expression(be->left);
+    destroy_expression(be->right);
+    free(be);
+}
+
+void destroy_expression(expression_t *expr)
+{
+    if( UNARY == expr->kind )
+        destroy_unary(expr->value.unary);
+    else if( BINARY == expr->kind )
+        destroy_binary(expr->value.binary);
+    free(expr);
+}
+
 
 typedef enum _statement_kind {
     END = 0,
@@ -74,33 +146,25 @@ typedef enum _statement_kind {
 } statement_kind_t;
 
 typedef struct _statement statement_t;
-
-typedef struct _end {} end_t;
-
-end_t *create_end()
-{
-    return malloc(sizeof(end_t));
-}
-
+typedef void *end_t;
 
 typedef struct _input {
-    variable_t **variables;
+    char *variables;
 } input_t;
 
-input_t *create_input(variable_t **vars)
+input_t *create_input(char *vars)
 {
     input_t *inp = malloc(sizeof(input_t));
-    // TODO: set variables
+    inp->variables = vars;
     return inp;
 }
-
 
 typedef struct _print {
     expression_t **expressions;
 } print_t;
 
 typedef struct _let {
-    variable_t *variable;
+    char variable;
     expression_t *right;
 } let_t;
 
@@ -118,20 +182,16 @@ typedef struct _gosub {
     expression_t *target;
 } gosub_t;
 
-typedef struct _return {} return_t;
-
 struct _statement {
     statement_kind_t kind;
     unsigned int line;
     union {
-        end_t *end;
         input_t *input;
         print_t *print;
         let_t *let;
         if_t *ifc;
         goto_t *gotoc;
         gosub_t *gosub;
-        return_t *returnc;
     } body;
 };
 
@@ -193,7 +253,6 @@ bool is_real(lexeme_t *lex, double val)
 
 
 /* Շարայուսական վերլուծություն */
-#define BUFFER_SIZE 128
 
 typedef struct _scanner {
     FILE *source;
@@ -288,7 +347,6 @@ lexeme_t scan_identifier_or_name(scanner_t *scanner)
 
 // lexeme_t scan_operation(scanner_t *scanner)
 // {
-
 // }
 
 lexeme_t next_lexeme(scanner_t *scanner)
@@ -387,10 +445,26 @@ bool match(parser_t *parser, token_t expected)
     return false;
 }
 
+typedef unsigned int error_code_t;
+typedef struct _result {
+    void *item;
+    error_code_t ec; 
+} result_t;
+
+expression_t *parse_expression(parser_t *parser)
+{
+    switch( parser->lookehead.token ) {
+        case T_INTEGER:
+        case T_NAME:
+        case T_SUB:
+        case T_LPAR:
+    }
+    return NULL;
+}
+
 end_t *parse_end(parser_t *parser)
 {
-    if( match(parser, T_END) ) return NULL;
-
+    if( !match(parser, T_END) ) return NULL;
 }
 
 statement_t *parse_statement(parser_t *parser)
@@ -419,14 +493,17 @@ statement_t *parse_statement(parser_t *parser)
 
 statement_t *parse_line(parser_t *parser)
 {
-    if( match(parser, T_INTEGER) ) return NULL;
+    if( !match(parser, T_INTEGER) ) return NULL;
     // TODO: parse statement
-    if( match(parser, T_EOL) ) return NULL;
+    if( !match(parser, T_EOL) ) return NULL;
 }
 
 void parse(parser_t *parser)
 {
     parser->lookehead = next_lexeme(parser->scanner);
+    while( parser->lookehead.token == T_INTEGER ) {
+        parse_line(parser);
+    }
 }
 
 
