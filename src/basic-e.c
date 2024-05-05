@@ -59,6 +59,11 @@ void add_back(vector_t *vec, void *el)
     vec->items[vec->count] = el;
 }
 
+void for_each_item(vector_t *vec, void(*f)(void *))
+{
+    for( size_t i = 0; i < vec->count; ++i )
+        f(vec->items[i]);
+}
 
 /* Տվյալների կառուցվածքներ */
 
@@ -549,6 +554,21 @@ typedef struct _result {
     error_code_t ec; 
 } result_t;
 
+bool failed(const result_t *r)
+{
+    return P_OK != r->ec;
+}
+
+result_t result_with_ptr(void *p)
+{
+    return (result_t){ .item = p, .ec = P_OK };
+}
+
+result_t result_with_error(error_code_t ec)
+{
+    return (result_t){ .item = NULL, .ec = ec };
+}
+
 result_t parse_expression(parser_t *parser);
 
 result_t parse_factor(parser_t *parser)
@@ -634,10 +654,89 @@ result_t parse_expression(parser_t *parser)
 result_t parse_end(parser_t *parser)
 {
     if( !match(parser, T_END) )
-        return (result_t){ .item = NULL, .ec = 0x0102 };
+        return result_with_error(0x0102);
     
-    // TODO: 
-    return (result_t){ .item = NULL, .ec = P_OK };
+    return result_with_ptr(create_end());
+}
+
+result_t parse_input(parser_t *parser)
+{
+    if( !match(parser, T_INPUT) )
+        return result_with_error(0x0103);
+
+    char name = parser->lookahead.value.name;
+    if( !match(parser, T_NAME) )
+        return result_with_error(0x0104);
+    while( T_COMMA == parser->lookahead.token ) {
+        match(parser, T_COMMA);
+        name = parser->lookahead.value.name;
+        if( !match(parser, T_NAME) )
+            return result_with_error(0x0105);
+    }
+
+    return result_with_ptr(create_input(NULL));
+}
+
+result_t parse_print(parser_t *parser)
+{
+    if( !match(parser, T_PRINT) )
+        return result_with_error(0x0106);
+
+    result_t rs = parse_expression(parser);
+    if( rs.ec != P_OK )
+        return result_with_error(0x0107);
+    vector_t *exprs = create_vector(4);
+    add_back(exprs, rs.item);
+    while( T_COMMA == parser->lookahead.token ) {
+        match(parser, T_COMMA);
+        result_t r2 = parse_expression(parser);
+        if( r2.ec != P_OK ) {
+            for_each_item(exprs, destroy_expression);
+            return result_with_error(0x0108);
+        }
+        add_back(exprs, r2.item);
+    }
+
+    return result_with_ptr(create_print(exprs));
+}
+
+result_t parse_let(parser_t *parser)
+{
+    if( !match(parser, T_PRINT) )
+        return result_with_error(0x0109);
+
+    char name = parser->lookahead.value.name;
+    if( !match(parser, T_NAME) )
+        return result_with_error(0x010a);
+
+    if( !match(parser, T_EQ) )
+        return result_with_error(0x010b);
+
+    result_t rs = parse_expression(parser);
+    if( rs.ec != P_OK )
+        return result_with_error(0x010c);
+
+    return result_with_ptr(create_let(name, rs.item));
+}
+
+result_t parse_if(parser_t *parser)
+{
+    if( !match(parser, T_IF) )
+        return result_with_error(0x010d);
+
+    result_t e0 = parse_expression(parser);
+    if( failed(&e0) )
+        return result_with_error(0x010e);
+
+    token_t t = parser->lookahead.token;
+    if( T_EQ == t || T_NE == t || T_GT == t || 
+        T_GE == t || T_LT == t || T_LE == t ) {
+           
+    }
+
+    result_t e1 = parse_expression(parser);
+    if( failed(&e1) )
+        return result_with_error(0x010f);
 }
 
 statement_t *parse_statement(parser_t *parser)
