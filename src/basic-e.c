@@ -425,7 +425,7 @@ lexeme_t next_lexeme(scanner_t *scanner)
 
 typedef struct _parser {
     scanner_t *scanner;
-    lexeme_t lookehead;
+    lexeme_t lookahead;
 } parser_t;
 
 parser_t *create_parser(scanner_t *scanner)
@@ -437,8 +437,8 @@ parser_t *create_parser(scanner_t *scanner)
 
 bool match(parser_t *parser, token_t expected)
 {
-    if( parser->lookehead.token == expected ) {
-        parser->lookehead = next_lexeme(parser->scanner);
+    if( parser->lookahead.token == expected ) {
+        parser->lookahead = next_lexeme(parser->scanner);
         return true;
     }
 
@@ -446,20 +446,91 @@ bool match(parser_t *parser, token_t expected)
 }
 
 typedef unsigned int error_code_t;
+const error_code_t P_OK = 0;
+
 typedef struct _result {
     void *item;
     error_code_t ec; 
 } result_t;
 
-expression_t *parse_expression(parser_t *parser)
+result_t parse_expression(parser_t *parser);
+
+result_t parse_factor(parser_t *parser)
 {
-    switch( parser->lookehead.token ) {
-        case T_INTEGER:
-        case T_NAME:
-        case T_SUB:
-        case T_LPAR:
+    token_t token = parser->lookahead.token;
+
+    if( T_NAME == parser->lookahead.token ) {
+        char name = parser->lookahead.value.name;
+        match(parser, T_NAME);
+        expression_t *vr = create_variable(name);
+        return (result_t){ .item = vr, .ec = 0 };
     }
-    return NULL;
+
+    if( T_INTEGER == token || T_REAL == token ) {
+        double num = parser->lookahead.value.number;
+        match(parser, token);
+        expression_t *nm = create_number(num);
+        return (result_t){ .item = nm, .ec = 0 };
+    }
+
+    if( T_LPAR == token ) {
+        match(parser, T_LPAR);
+        result_t rs = parse_expression(parser);
+        if( rs.ec != P_OK )
+            return rs;
+        if( !match(parser, T_RPAR) )
+            return (result_t){ .item = NULL, .ec = 0x0101 };
+        return rs;
+    }
+
+    return (result_t){ .item = NULL, .ec = 0 };
+}
+
+result_t parse_term(parser_t *parser)
+{
+    result_t rs = parse_factor(parser);
+    if( rs.ec != P_OK )
+        return rs;
+
+    while( T_MUL == parser->lookahead.token || T_DIV == parser->lookahead.token ) {
+        operation_t oper = T_DIV == parser->lookahead.token ? DIV : MUL;
+        match(parser, parser->lookahead.token);
+        result_t r2 = parse_factor(parser);
+        if( r2.ec != P_OK )
+            return r2;
+        rs.item = create_binary(oper, rs.item, r2.item);
+    }
+
+    return rs;
+}
+
+result_t parse_expression(parser_t *parser)
+{
+    operation_t unop = ADD;
+    if( T_ADD == parser->lookahead.token )
+        match(parser, T_ADD);
+    else if( T_SUB == parser->lookahead.token ) {
+        unop = SUB;
+        match(parser, T_SUB);
+    }
+
+    result_t rs = parse_term(parser);
+    if( rs.ec != P_OK )
+        return rs;
+    
+    if( SUB == unop )
+        rs.item = create_unary(unop, rs.item);
+
+    while( T_ADD == parser->lookahead.token || T_SUB == parser->lookahead.token ) {
+        operation_t oper = T_ADD == parser->lookahead.token ? ADD : SUB;
+        match(parser, parser->lookahead.token);
+        result_t r2 = parse_term(parser);
+        if( r2.ec != P_OK )
+            return r2;
+        rs.item = create_binary(oper, rs.item, r2.item);
+    }
+
+    return rs;
 }
 
 end_t *parse_end(parser_t *parser)
@@ -469,7 +540,7 @@ end_t *parse_end(parser_t *parser)
 
 statement_t *parse_statement(parser_t *parser)
 {
-    switch( parser->lookehead.token ) {
+    switch( parser->lookahead.token ) {
         case T_END:
             break;
         case T_INPUT:
@@ -500,8 +571,8 @@ statement_t *parse_line(parser_t *parser)
 
 void parse(parser_t *parser)
 {
-    parser->lookehead = next_lexeme(parser->scanner);
-    while( parser->lookehead.token == T_INTEGER ) {
+    parser->lookahead = next_lexeme(parser->scanner);
+    while( parser->lookahead.token == T_INTEGER ) {
         parse_line(parser);
     }
 }
