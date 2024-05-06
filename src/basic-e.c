@@ -55,8 +55,8 @@ void add_back(vector_t *vec, void *el)
         vec->items = realloc(vec->items, vec->capacity * sizeof(void *));
     }
 
-    ++vec->count;
     vec->items[vec->count] = el;
+    ++vec->count;
 }
 
 void for_each_item(vector_t *vec, void(*f)(void *))
@@ -64,6 +64,7 @@ void for_each_item(vector_t *vec, void(*f)(void *))
     for( size_t i = 0; i < vec->count; ++i )
         f(vec->items[i]);
 }
+
 
 /* Տվյալների կառուցվածքներ */
 
@@ -188,55 +189,18 @@ typedef enum _statement_kind {
 
 typedef struct _statement statement_t;
 
-statement_t *_create_statement(statement_kind_t kind)
-{
-    statement_t *st = malloc(sizeof(statement_t));
-    st->kind = kind;
-    return st;
-}
-
-statement_t *create_end()
-{
-    return _create_expression(END);
-}
-
 typedef struct _input {
     char *variables;
 } input_t;
-
-statement_t *create_input(char *vars)
-{
-    statement_t *st = _create_statement(INPUT);
-    st->body.input = malloc(sizeof(input_t));
-    st->body.input->variables = vars;
-    return st;
-}
 
 typedef struct _print {
     vector_t *expressions;
 } print_t;
 
-statement_t *create_print(vector_t *exprs)
-{
-    statement_t *st = _create_statement(PRINT);
-    st->body.print = malloc(sizeof(print_t));
-    st->body.print->expressions = exprs;
-    return st;
-}
-
 typedef struct _let {
     char variable;
     expression_t *right;
 } let_t;
-
-statement_t *create_let(char var, expression_t *expr)
-{
-    statement_t *st = _create_statement(LET);
-    st->body.let = malloc(sizeof(let_t));
-    st->body.let->variable = var;
-    st->body.let->right = expr;
-    return st;
-}
 
 typedef struct _if {
     expression_t *condition;
@@ -244,44 +208,13 @@ typedef struct _if {
     statement_t *alternative;
 } if_t;
 
-statement_t *create_if(expression_t *cond, statement_t *dec, statement_t *alt)
-{
-    statement_t *st = _create_statement(IF);
-    st->body.ifc = malloc(sizeof(if_t));
-    st->body.ifc->condition = cond;
-    st->body.ifc->decision = dec;
-    st->body.ifc->alternative = alt;
-    return st;
-}
-
 typedef struct _goto {
     expression_t *target;
 } goto_t;
 
-statement_t *create_goto(expression_t *tg)
-{
-    statement_t *st = _create_statement(GOTO);
-    st->body.gotoc = malloc(sizeof(goto_t));
-    st->body.gotoc->target = tg;
-    return st;
-}
-
 typedef struct _gosub {
     expression_t *target;
 } gosub_t;
-
-statement_t *create_gosub(expression_t *tg)
-{
-    statement_t *st = _create_statement(GOTO);
-    st->body.gosub = malloc(sizeof(gosub_t));
-    st->body.gosub->target = tg;
-    return st;
-}
-
-statement_t *create_return()
-{
-    return _create_statement(RETURN);
-}
 
 struct _statement {
     statement_kind_t kind;
@@ -296,10 +229,78 @@ struct _statement {
     } body;
 };
 
+statement_t *_create_statement(statement_kind_t kind)
+{
+    statement_t *st = malloc(sizeof(statement_t));
+    st->kind = kind;
+    return st;
+}
+
+statement_t *create_end()
+{
+    return _create_statement(END);
+}
+
+statement_t *create_input(char *vars)
+{
+    statement_t *st = _create_statement(INPUT);
+    st->body.input = malloc(sizeof(input_t));
+    st->body.input->variables = vars;
+    return st;
+}
+
+statement_t *create_print(vector_t *exprs)
+{
+    statement_t *st = _create_statement(PRINT);
+    st->body.print = malloc(sizeof(print_t));
+    st->body.print->expressions = exprs;
+    return st;
+}
+
+statement_t *create_let(char var, expression_t *expr)
+{
+    statement_t *st = _create_statement(LET);
+    st->body.let = malloc(sizeof(let_t));
+    st->body.let->variable = var;
+    st->body.let->right = expr;
+    return st;
+}
+
+statement_t *create_if(expression_t *cond, statement_t *dec, statement_t *alt)
+{
+    statement_t *st = _create_statement(IF);
+    st->body.ifc = malloc(sizeof(if_t));
+    st->body.ifc->condition = cond;
+    st->body.ifc->decision = dec;
+    st->body.ifc->alternative = alt;
+    return st;
+}
+
+statement_t *create_goto(expression_t *tg)
+{
+    statement_t *st = _create_statement(GOTO);
+    st->body.gotoc = malloc(sizeof(goto_t));
+    st->body.gotoc->target = tg;
+    return st;
+}
+
+statement_t *create_gosub(expression_t *tg)
+{
+    statement_t *st = _create_statement(GOTO);
+    st->body.gosub = malloc(sizeof(gosub_t));
+    st->body.gosub->target = tg;
+    return st;
+}
+
+statement_t *create_return()
+{
+    return _create_statement(RETURN);
+}
+
 
 /* Լեքսեմը */
 typedef enum _token {
-    T_NONE,
+    T_NONE = 0,
     T_INTEGER,
     T_REAL,
     T_NAME,
@@ -729,45 +730,79 @@ result_t parse_if(parser_t *parser)
         return result_with_error(0x010e);
 
     token_t t = parser->lookahead.token;
-    if( T_EQ == t || T_NE == t || T_GT == t || 
-        T_GE == t || T_LT == t || T_LE == t ) {
-           
+    if( t >= T_EQ && t <= T_LE ) {
+        
     }
 
     result_t e1 = parse_expression(parser);
     if( failed(&e1) )
         return result_with_error(0x010f);
+
+    return result_with_ptr(NULL);
 }
 
-statement_t *parse_statement(parser_t *parser)
+result_t parse_goto(parser_t* parser)
+{
+    if( !match(parser, T_GOTO) )
+        return result_with_error(0x0110);
+
+    result_t rs = parse_expression(parser);
+    if( failed(&rs) )
+        return result_with_error(0x111);
+
+    return result_with_ptr(create_goto(rs.item));
+}
+
+result_t parse_gosub(parser_t* parser)
+{
+    if( !match(parser, T_GOSUB) )
+        return result_with_error(0x0112);
+
+    result_t rs = parse_expression(parser);
+    if( failed(&rs) )
+        return result_with_error(0x113);
+
+    return result_with_ptr(create_gosub(rs.item));
+}
+
+result_t parse_return(parser_t* parser)
+{
+    if( !match(parser, T_RETURN) )
+        return result_with_error(0x0114);
+
+    return result_with_ptr(create_return());
+}
+
+result_t parse_statement(parser_t *parser)
 {
     switch( parser->lookahead.token ) {
         case T_END:
-            break;
+            return parse_end(parser);
         case T_INPUT:
-            break;
+            return parse_input(parser);
         case T_PRINT:
-            break;
+            return parse_print(parser);
         case T_LET:
-            break;
+            return parse_let(parser);
         case T_IF:
-            break;
+            return parse_if(parser);
         case T_GOTO:
-            break;
+            return parse_goto(parser);
         case T_GOSUB:
-            break;
+            return parse_gosub(parser);
         case T_RETURN:
-            break;
+            return parse_return(parser);
     }
 
-    return NULL;
+    return result_with_error(0x0115);
 }
 
-statement_t *parse_line(parser_t *parser)
+result_t parse_line(parser_t *parser)
 {
-    if( !match(parser, T_INTEGER) ) return NULL;
+    //if( !match(parser, T_INTEGER) ) return NULL;
     // TODO: parse statement
-    if( !match(parser, T_EOL) ) return NULL;
+    //if( !match(parser, T_EOL) ) return NULL;
+    return result_with_ptr(NULL);
 }
 
 void parse(parser_t *parser)
