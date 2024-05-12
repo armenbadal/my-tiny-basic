@@ -42,10 +42,9 @@ vector_t *create_vector(size_t cap)
     return vec;
 }
 
-void destroy_vector(vector_t *vec)
+void *get_elem(vector_t *vec, size_t index)
 {
-    free(vec->items);
-    free(vec);
+    return vec->items[index];
 }
 
 void add_back(vector_t *vec, void *el)
@@ -59,10 +58,24 @@ void add_back(vector_t *vec, void *el)
     ++vec->count;
 }
 
-void for_each_item(vector_t *vec, void(*f)(void *))
+typedef void(*action_t)(void *);
+
+void for_each_item(vector_t *vec, action_t f)
 {
     for( size_t i = 0; i < vec->count; ++i )
         f(vec->items[i]);
+}
+
+void destroy_vector(vector_t *vec)
+{
+    free(vec->items);
+    free(vec);
+}
+
+void destroy_vector_and_elements(vector_t *vec, void(*destroyer)(void *))
+{
+    for_each_item(vec, destroyer);
+    destroy_vector(vec);
 }
 
 
@@ -190,7 +203,7 @@ typedef enum _statement_kind {
 typedef struct _statement statement_t;
 
 typedef struct _input {
-    char *variables;
+    vector_t *variables;
 } input_t;
 
 typedef struct _print {
@@ -229,6 +242,15 @@ struct _statement {
     } body;
 };
 
+/*
+#define s_input(s) (s)->body.input
+#define s_print(s) (s)->body.print
+#define s_let(s) (s)->body.let
+#define s_if(s) (s)->body.ifc
+#define s_goto(s) (s)->body.gotoc
+#define s_gosub(s) (s)->body.gosub
+*/
+
 statement_t *_create_statement(statement_kind_t kind)
 {
     statement_t *st = malloc(sizeof(statement_t));
@@ -241,7 +263,7 @@ statement_t *create_end()
     return _create_statement(END);
 }
 
-statement_t *create_input(char *vars)
+statement_t *create_input(vector_t *vars)
 {
     statement_t *st = _create_statement(INPUT);
     st->body.input = malloc(sizeof(input_t));
@@ -295,6 +317,42 @@ statement_t *create_gosub(expression_t *tg)
 statement_t *create_return()
 {
     return _create_statement(RETURN);
+}
+
+void destroy_statement(statement_t *s)
+{
+    switch( s->kind ) {
+        case INPUT:
+            destroy_vector_and_elements(s->body.input->variables, free);
+            free(s->body.input);
+            break;
+        case PRINT:
+            destroy_vector_and_elements(s->body.print->expressions, (action_t)destroy_expression);
+            free(s->body.print);
+            break;
+        case LET:
+            destroy_expression(s->body.let->right);
+            free(s->body.let);
+            break;
+        case IF:
+            destroy_expression(s->body.ifc->condition);
+            destroy_statement(s->body.ifc->decision);
+            destroy_statement(s->body.ifc->alternative);
+            free(s->body.ifc);
+            break;
+        case GOTO:
+            destroy_expression(s->body.gotoc->target);
+            free(s->body.gotoc);
+            break;
+        case GOSUB:
+            break;
+            destroy_expression(s->body.gosub->target);
+            free(s->body.gotoc);
+        case END:
+        case RETURN:
+    }
+
+    free(s);
 }
 
 
@@ -373,6 +431,12 @@ scanner_t *create_scanner(const char *file)
     scanner->ch = fgetc(scanner->source);
 
     return scanner;
+}
+
+void destroy_scanner(scanner_t *scanner)
+{
+    fclose(scanner->source);
+    free(scanner);
 }
 
 bool advance(scanner_t *scanner)
@@ -537,6 +601,11 @@ parser_t *create_parser(scanner_t *scanner)
     return parser;
 }
 
+void destroy_parser(parser_t *parser)
+{
+    free(parser);
+}
+
 bool match(parser_t *parser, token_t expected)
 {
     if( parser->lookahead.token == expected ) {
@@ -665,17 +734,22 @@ result_t parse_input(parser_t *parser)
     if( !match(parser, T_INPUT) )
         return result_with_error(0x0103);
 
+    vector_t *variables = create_vector(4);
+
     char name = parser->lookahead.value.name;
     if( !match(parser, T_NAME) )
         return result_with_error(0x0104);
+    add_back(variables, create_variable(name));
+
     while( T_COMMA == parser->lookahead.token ) {
         match(parser, T_COMMA);
         name = parser->lookahead.value.name;
         if( !match(parser, T_NAME) )
             return result_with_error(0x0105);
+        add_back(variables, create_variable(name));
     }
 
-    return result_with_ptr(create_input(NULL));
+    return result_with_ptr(create_input(variables));
 }
 
 result_t parse_print(parser_t *parser)
@@ -688,11 +762,12 @@ result_t parse_print(parser_t *parser)
         return result_with_error(0x0107);
     vector_t *exprs = create_vector(4);
     add_back(exprs, rs.item);
+
     while( T_COMMA == parser->lookahead.token ) {
         match(parser, T_COMMA);
         result_t r2 = parse_expression(parser);
         if( r2.ec != P_OK ) {
-            for_each_item(exprs, destroy_expression);
+            for_each_item(exprs, (action_t)destroy_expression);
             return result_with_error(0x0108);
         }
         add_back(exprs, r2.item);
@@ -792,6 +867,8 @@ result_t parse_statement(parser_t *parser)
             return parse_gosub(parser);
         case T_RETURN:
             return parse_return(parser);
+        default:
+            break;
     }
 
     return result_with_error(0x0115);
@@ -799,61 +876,261 @@ result_t parse_statement(parser_t *parser)
 
 result_t parse_line(parser_t *parser)
 {
-    //if( !match(parser, T_INTEGER) ) return NULL;
-    // TODO: parse statement
-    //if( !match(parser, T_EOL) ) return NULL;
-    return result_with_ptr(NULL);
+    if( !match(parser, T_INTEGER) )
+        return result_with_error(0x0116);
+    
+    result_t rs = parse_statement(parser);
+    if( failed(&rs) )
+        return result_with_error(0x0117);
+
+    if( !match(parser, T_EOL) )
+        return result_with_error(0x0118);
+
+    return result_with_ptr(rs.item);
 }
 
-void parse(parser_t *parser)
+result_t parse(parser_t *parser)
 {
+    vector_t *program = create_vector(16);
+
     parser->lookahead = next_lexeme(parser->scanner);
     while( parser->lookahead.token == T_INTEGER ) {
-        parse_line(parser);
+        result_t rs = parse_line(parser);
+        if( failed(&rs) ) {
+            for_each_item(program, (action_t)destroy_statement);
+            destroy_vector(program);
+            return result_with_error(0x0120);
+        }
+        add_back(program, rs.item);
+    }
+
+    return result_with_ptr(program);
+}
+
+/* Ինտերպրետատոր */
+
+typedef struct _interpreter {
+    vector_t *program;
+    unsigned int pc;
+    double environment[26];
+} interpreter_t;
+
+interpreter_t *create_interpreter(vector_t *program)
+{
+    interpreter_t *vi = malloc(sizeof(interpreter_t));
+    vi->program = program;
+    vi->pc = 0;
+    memset(vi->environment, 26, sizeof(double));
+    return vi;
+}
+
+void destroy_interpreter(interpreter_t *vi)
+{
+    free(vi);
+}
+
+typedef double value_t;
+value_t evaluate_expression(interpreter_t *vi, expression_t *e);
+
+value_t evaluate_unary(interpreter_t *vi, unary_t *e)
+{
+    value_t value = evaluate_expression(vi, e->subexpr);
+    if( e->operation == SUB )
+        value = -value;
+    return value;
+}
+
+value_t evaluate_binary(interpreter_t *vi, binary_t *e)
+{
+    value_t vleft = evaluate_expression(vi, e->left);
+    value_t vright = evaluate_expression(vi, e->right);
+
+    value_t value = 0.0;
+    switch( e->operation ) {
+        case ADD:
+            value = vleft + vright;
+            break;
+        case SUB:
+            value = vleft - vright;
+            break;
+        case MUL:
+            value = vleft * vright;
+            break;
+        case DIV:
+            value = vleft / vright;
+            break;
+        case EQ:
+            value = vleft == vright;
+            break;
+        case NE:
+            value = vleft != vright;
+            break;
+        case GT:
+            value = vleft > vright;
+            break;
+        case GE:
+            value = vleft >= vright;
+            break;
+        case LT:
+            value = vleft < vright;
+            break;
+        case LE: 
+            value = vleft <= vright;
+            break;
+    }
+
+    return value;
+}
+
+size_t index_of(char name)
+{
+    return toupper(name) - 'A';
+}
+
+value_t evaluate_expression(interpreter_t *vi, expression_t *e)
+{
+    value_t value = 0.0;
+
+    switch( e->kind ) {
+        case NUMBER:
+            value = e->value.number;
+            break;
+        case VARIABLE:
+            value = vi->environment[index_of(e->value.name)];
+            break;
+        case UNARY:
+            value = evaluate_unary(vi, e->value.unary);
+            break;
+        case BINARY:
+            value = evaluate_binary(vi, e->value.binary);
+            break;
+    }
+
+    return value;
+}
+
+void execute_input(interpreter_t *vi, input_t *s)
+{
+    for( int i = 0; i < s->variables->count; ++i ) {
+        printf("? ");
+        double value = 0.0;
+        scanf("%lf", &value);
+        expression_t *ex = (expression_t *)(s->variables->items[i]);
+        char name = ex->value.name;
+        vi->environment[index_of(name)] = value;
     }
 }
 
-
-/* TESTS */
-#define EXPECT(a) if(!(a)) fprintf(stderr, "FAILED: %s\n", #a)
-
-void test_scanner()
+void execute_print(interpreter_t *vi, print_t *s)
 {
-    scanner_t *scanner = create_scanner("../cases/case01.bas");
-    EXPECT(scanner != NULL);
-
-    lexeme_t lex = next_lexeme(scanner);
-    EXPECT(is_integer(&lex, 10));
-
-    lex = next_lexeme(scanner);
-    EXPECT(is_keyword(&lex, T_PRINT));
-
-    lex = next_lexeme(scanner);
-    EXPECT(is_real(&lex, 3.1415));
-
-    lex = next_lexeme(scanner);
-    EXPECT(lex.token == T_EOL);
-
-    lex = next_lexeme(scanner);
-    EXPECT(is_integer(&lex, 20));
-
-    lex = next_lexeme(scanner);
-    EXPECT(is_keyword(&lex, T_END));
-
-    lex = next_lexeme(scanner);
-    EXPECT(lex.token == T_EOL);
-
-    lex = next_lexeme(scanner);
-    EXPECT(lex.token == T_EOF);
+    for( int i = 0; i < s->expressions->count; ++i ) {
+        value_t value = evaluate_expression(vi, s->expressions->items[i]);
+        printf("%lf\t", value);
+    }
+    putchar('\n');
 }
+
+void execute_let(interpreter_t *vi, let_t *s)
+{
+
+}
+
+void execute_if(interpreter_t *vi, if_t *s)
+{
+
+}
+
+void execute_goto(interpreter_t *vi, goto_t *s)
+{
+    value_t val = evaluate_expression(vi, s->target);
+    unsigned int line = (unsigned int)val;
+    for(int i = 0; i < vi->program->count; ++i) {
+        statement_t *s = (statement_t *)vi->program->items[i];
+        if( s->line == line ) {
+            vi->pc = i;
+            break;
+        }
+    }
+}
+
+void execute_gosub(interpreter_t *vi, gosub_t *s)
+{
+
+}
+
+void execute_return(interpreter_t *vi)
+{
+
+}
+
+void execute_statement(interpreter_t *vi, statement_t *s)
+{
+    switch( s->kind ) {
+        case END:
+            break;
+        case INPUT:
+            execute_input(vi, s->body.input);
+            ++vi->pc;
+            break;
+        case PRINT:
+            execute_print(vi, s->body.print);
+            ++vi->pc;
+            break;
+        case LET:
+            execute_let(vi, s->body.let);
+            ++vi->pc;
+            break;
+        case IF:
+            execute_if(vi, s->body.ifc);
+            ++vi->pc;
+        case GOTO:
+            execute_goto(vi, s->body.gotoc);
+            break;
+        case GOSUB:
+            execute_gosub(vi, s->body.gosub);
+            break;
+        case RETURN:
+            execute_return(vi);
+            break;
+    }
+}
+
+void run(interpreter_t *vi)
+{
+    while( true ) {
+        statement_t *s = get_elem(vi->program, vi->pc);
+        if( s->kind == END )
+            break;
+        execute_statement(vi, s);
+    }
+}
+
 
 
 
 int main(int argc, char **argv)
 {
-    printf("Tiny BASIC, 2024\n");
+    // if( argc < 2 ) {
+    //     printf("Tiny BASIC, 2024\n");
+    //     return 0;
+    // }
 
-    test_scanner();
+    scanner_t *scanner = create_scanner("/home/armen/Projects/my-tiny-basic/cases/case01.bas");
+    parser_t *parser = create_parser(scanner);
+    const result_t rs = parse(parser);
+    if( failed(&rs) )
+        puts("Parse failed.");
+
+    // interprete
+    interpreter_t *vi = create_interpreter(rs.item);
+    run(vi);
+    destroy_interpreter(vi);
+
+    // cleanup
+    destroy_vector_and_elements(rs.item, (void(*)(void *))destroy_statement);
+    destroy_parser(parser);
+    destroy_scanner(scanner);
+    
 
     return 0;
 }
