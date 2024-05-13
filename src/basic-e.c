@@ -9,7 +9,7 @@ statement = PRINT expr-list
     | LET var = expression
     | GOSUB expression
     | RETURN
-    | END
+    | S_END
 expr-list = (string | expression) (, (string | expression) *).
 var-list = var (, var)*
 expression = (+|-|ε) term ((+|-) term)*
@@ -36,13 +36,18 @@ typedef struct _vector {
 vector_t *create_vector(size_t cap)
 {
     vector_t *vec = malloc(sizeof(vector_t));
+    if( NULL == vec ) return NULL;
     vec->capacity = cap;
     vec->count = 0;
     vec->items = malloc(vec->capacity * sizeof(void *));
+    if( NULL == vec->items ) {
+        free(vec);
+        return NULL;
+    }
     return vec;
 }
 
-void *get_elem(vector_t *vec, size_t index)
+void *get_elem(const vector_t *vec, size_t index)
 {
     return vec->items[index];
 }
@@ -60,7 +65,7 @@ void add_back(vector_t *vec, void *el)
 
 typedef void(*action_t)(void *);
 
-void for_each_item(vector_t *vec, action_t f)
+void for_each_item(const vector_t *vec, action_t f)
 {
     for( size_t i = 0; i < vec->count; ++i )
         f(vec->items[i]);
@@ -82,10 +87,10 @@ void destroy_vector_and_elements(vector_t *vec, void(*destroyer)(void *))
 /* Տվյալների կառուցվածքներ */
 
 typedef enum _expression_kind {
-    NUMBER,
-    VARIABLE,
-    UNARY,
-    BINARY
+    E_NUMBER,
+    E_VARIABLE,
+    E_UNARY,
+    E_BINARY
 } expression_kind_t;
 
 typedef struct _expression expression_t;
@@ -127,28 +132,35 @@ struct _expression {
 expression_t *_create_expression(expression_kind_t kind)
 {
     expression_t *ex = malloc(sizeof(expression_t));
+    if( NULL == ex ) return NULL;
     ex->kind = kind;
     return ex;
 }
 
+void destroy_expression(expression_t *expr);
+
 expression_t *create_number(double value)
 {
-    expression_t *ex = _create_expression(NUMBER);
+    expression_t *ex = _create_expression(E_NUMBER);
     ex->value.number = value;
     return ex;
 }
 
 expression_t *create_variable(char name)
 {
-    expression_t *ex = _create_expression(VARIABLE);
+    expression_t *ex = _create_expression(E_VARIABLE);
     ex->value.name = name;
     return ex;
 }
 
 expression_t *create_unary(operation_t op, expression_t *se)
 {
-    expression_t *ex = _create_expression(UNARY);
+    expression_t *ex = _create_expression(E_UNARY);
     ex->value.unary = malloc(sizeof(unary_t));
+    if( NULL == ex->value.unary ) {
+        destroy_expression(ex);
+        return NULL;
+    }
     ex->value.unary->operation = op;
     ex->value.unary->subexpr = se;
     return ex;
@@ -156,15 +168,17 @@ expression_t *create_unary(operation_t op, expression_t *se)
 
 expression_t *create_binary(operation_t op, expression_t *l, expression_t *r)
 {
-    expression_t *ex = _create_expression(BINARY);
+    expression_t *ex = _create_expression(E_BINARY);
     ex->value.binary = malloc(sizeof(binary_t));
+    if( NULL == ex->value.binary ) {
+        destroy_expression(ex);
+        return NULL;
+    }
     ex->value.binary->operation = op;
     ex->value.binary->left = l;
     ex->value.binary->right = r;
     return ex;
 }
-
-void destroy_expression(expression_t *expr);
 
 void destroy_unary(unary_t *ue)
 {
@@ -181,23 +195,23 @@ void destroy_binary(binary_t *be)
 
 void destroy_expression(expression_t *expr)
 {
-    if( UNARY == expr->kind )
+    if( E_UNARY == expr->kind )
         destroy_unary(expr->value.unary);
-    else if( BINARY == expr->kind )
+    else if( E_BINARY == expr->kind )
         destroy_binary(expr->value.binary);
     free(expr);
 }
 
 
 typedef enum _statement_kind {
-    END = 0,
-    INPUT,
-    PRINT,
-    LET,
-    IF,
-    GOTO,
-    GOSUB,
-    RETURN
+    S_END = 0,
+    S_INPUT,
+    S_PRINT,
+    S_LET,
+    S_IF,
+    S_GOTO,
+    S_GOSUB,
+    S_RETURN
 } statement_kind_t;
 
 typedef struct _statement statement_t;
@@ -254,35 +268,50 @@ struct _statement {
 statement_t *_create_statement(statement_kind_t kind)
 {
     statement_t *st = malloc(sizeof(statement_t));
+    if( NULL == st ) return NULL;
     st->kind = kind;
     return st;
 }
 
+void destroy_statement(statement_t *s);
+
 statement_t *create_end()
 {
-    return _create_statement(END);
+    return _create_statement(S_END);
 }
 
 statement_t *create_input(vector_t *vars)
 {
-    statement_t *st = _create_statement(INPUT);
+    statement_t *st = _create_statement(S_INPUT);
     st->body.input = malloc(sizeof(input_t));
+    if( NULL == st->body.input ) {
+        destroy_statement(st);
+        return NULL;
+    }
     st->body.input->variables = vars;
     return st;
 }
 
 statement_t *create_print(vector_t *exprs)
 {
-    statement_t *st = _create_statement(PRINT);
+    statement_t *st = _create_statement(S_PRINT);
     st->body.print = malloc(sizeof(print_t));
+    if( NULL == st->body.print ) {
+        destroy_statement(st);
+        return NULL;
+    }
     st->body.print->expressions = exprs;
     return st;
 }
 
 statement_t *create_let(char var, expression_t *expr)
 {
-    statement_t *st = _create_statement(LET);
+    statement_t *st = _create_statement(S_LET);
     st->body.let = malloc(sizeof(let_t));
+    if( NULL == st->body.let ) {
+        destroy_statement(st);
+        return NULL;
+    }
     st->body.let->variable = var;
     st->body.let->right = expr;
     return st;
@@ -290,8 +319,12 @@ statement_t *create_let(char var, expression_t *expr)
 
 statement_t *create_if(expression_t *cond, statement_t *dec, statement_t *alt)
 {
-    statement_t *st = _create_statement(IF);
+    statement_t *st = _create_statement(S_IF);
     st->body.ifc = malloc(sizeof(if_t));
+    if( NULL == st->body.ifc ) {
+        destroy_statement(st);
+        return NULL;
+    }
     st->body.ifc->condition = cond;
     st->body.ifc->decision = dec;
     st->body.ifc->alternative = alt;
@@ -300,56 +333,66 @@ statement_t *create_if(expression_t *cond, statement_t *dec, statement_t *alt)
 
 statement_t *create_goto(expression_t *tg)
 {
-    statement_t *st = _create_statement(GOTO);
+    statement_t *st = _create_statement(S_GOTO);
     st->body.gotoc = malloc(sizeof(goto_t));
+    if( NULL == st->body.gotoc ) {
+        destroy_statement(st);
+        return NULL;
+    }
     st->body.gotoc->target = tg;
     return st;
 }
 
 statement_t *create_gosub(expression_t *tg)
 {
-    statement_t *st = _create_statement(GOTO);
+    statement_t *st = _create_statement(S_GOTO);
     st->body.gosub = malloc(sizeof(gosub_t));
+    if( NULL == st->body.gosub ) {
+        destroy_statement(st);
+        return NULL;
+    }
     st->body.gosub->target = tg;
     return st;
 }
 
 statement_t *create_return()
 {
-    return _create_statement(RETURN);
+    return _create_statement(S_RETURN);
 }
 
 void destroy_statement(statement_t *s)
 {
     switch( s->kind ) {
-        case INPUT:
+        case S_INPUT:
             destroy_vector_and_elements(s->body.input->variables, free);
             free(s->body.input);
             break;
-        case PRINT:
-            destroy_vector_and_elements(s->body.print->expressions, (action_t)destroy_expression);
+        case S_PRINT:
+            destroy_vector_and_elements(s->body.print->expressions,
+                                        (action_t)destroy_expression);
             free(s->body.print);
             break;
-        case LET:
+        case S_LET:
             destroy_expression(s->body.let->right);
             free(s->body.let);
             break;
-        case IF:
+        case S_IF:
             destroy_expression(s->body.ifc->condition);
             destroy_statement(s->body.ifc->decision);
             destroy_statement(s->body.ifc->alternative);
             free(s->body.ifc);
             break;
-        case GOTO:
+        case S_GOTO:
             destroy_expression(s->body.gotoc->target);
             free(s->body.gotoc);
             break;
-        case GOSUB:
-            break;
+        case S_GOSUB:
             destroy_expression(s->body.gosub->target);
             free(s->body.gotoc);
-        case END:
-        case RETURN:
+            break;
+        case S_END:
+        case S_RETURN:
+            break;
     }
 
     free(s);
@@ -395,21 +438,6 @@ typedef struct _lexeme {
         size_t label;
     } value;
 } lexeme_t;
-
-bool is_keyword(lexeme_t *lex, token_t tok)
-{
-    return lex->token == tok;
-}
-
-bool is_integer(lexeme_t *lex, int val)
-{
-    return T_INTEGER == lex->token && val == (int)lex->value.number;
-}
-
-bool is_real(lexeme_t *lex, double val)
-{
-    return T_REAL == lex->token && fabs(val - lex->value.number) < 1e-16;
-}
 
 
 /* Շարայուսական վերլուծություն */
@@ -511,10 +539,6 @@ lexeme_t scan_identifier_or_name(scanner_t *scanner)
     return kw;
 }
 
-// lexeme_t scan_operation(scanner_t *scanner)
-// {
-// }
-
 lexeme_t next_lexeme(scanner_t *scanner)
 {
     while( ' ' == scanner->ch || '\t' == scanner->ch )
@@ -582,6 +606,8 @@ lexeme_t next_lexeme(scanner_t *scanner)
         case ',':
             token = T_COMMA;
             break;
+        default:
+            break;
     }
     advance(scanner);
     return (lexeme_t){ .token = token };
@@ -597,6 +623,7 @@ typedef struct _parser {
 parser_t *create_parser(scanner_t *scanner)
 {
     parser_t *parser = malloc(sizeof(parser_t));
+    if( NULL == parser ) return NULL;
     parser->scanner = scanner;
     return parser;
 }
@@ -918,6 +945,7 @@ typedef struct _interpreter {
 interpreter_t *create_interpreter(vector_t *program)
 {
     interpreter_t *vi = malloc(sizeof(interpreter_t));
+    if( NULL == vi ) return NULL;
     vi->program = program;
     vi->pc = 0;
     memset(vi->environment, 26, sizeof(double));
@@ -992,16 +1020,16 @@ value_t evaluate_expression(interpreter_t *vi, expression_t *e)
     value_t value = 0.0;
 
     switch( e->kind ) {
-        case NUMBER:
+        case E_NUMBER:
             value = e->value.number;
             break;
-        case VARIABLE:
+        case E_VARIABLE:
             value = vi->environment[index_of(e->value.name)];
             break;
-        case UNARY:
+        case E_UNARY:
             value = evaluate_unary(vi, e->value.unary);
             break;
-        case BINARY:
+        case E_BINARY:
             value = evaluate_binary(vi, e->value.binary);
             break;
     }
@@ -1009,19 +1037,21 @@ value_t evaluate_expression(interpreter_t *vi, expression_t *e)
     return value;
 }
 
-void execute_input(interpreter_t *vi, input_t *s)
+void execute_statement(interpreter_t *vi, const statement_t *s);
+
+void execute_input(interpreter_t *vi, const input_t *s)
 {
     for( int i = 0; i < s->variables->count; ++i ) {
         printf("? ");
         double value = 0.0;
         scanf("%lf", &value);
-        expression_t *ex = (expression_t *)(s->variables->items[i]);
+        const expression_t *ex = (expression_t *)(s->variables->items[i]);
         char name = ex->value.name;
         vi->environment[index_of(name)] = value;
     }
 }
 
-void execute_print(interpreter_t *vi, print_t *s)
+void execute_print(interpreter_t *vi, const print_t *s)
 {
     for( int i = 0; i < s->expressions->count; ++i ) {
         value_t value = evaluate_expression(vi, s->expressions->items[i]);
@@ -1030,22 +1060,27 @@ void execute_print(interpreter_t *vi, print_t *s)
     putchar('\n');
 }
 
-void execute_let(interpreter_t *vi, let_t *s)
+void execute_let(interpreter_t *vi, const let_t *s)
 {
-
+    value_t val = evaluate_expression(vi, s->right);
+    vi->environment[index_of(s->variable)] = val;
 }
 
-void execute_if(interpreter_t *vi, if_t *s)
+void execute_if(interpreter_t *vi, const if_t *s)
 {
-
+    value_t cond_val = evaluate_expression(vi, s->condition);
+    if( cond_val != 0 )
+        execute_statement(vi, s->decision);
+    else
+        execute_statement(vi, s->alternative);
 }
 
-void execute_goto(interpreter_t *vi, goto_t *s)
+void execute_goto(interpreter_t *vi, const goto_t *s)
 {
     value_t val = evaluate_expression(vi, s->target);
     unsigned int line = (unsigned int)val;
     for(int i = 0; i < vi->program->count; ++i) {
-        statement_t *s = (statement_t *)vi->program->items[i];
+        const statement_t *s = (statement_t *)vi->program->items[i];
         if( s->line == line ) {
             vi->pc = i;
             break;
@@ -1053,7 +1088,7 @@ void execute_goto(interpreter_t *vi, goto_t *s)
     }
 }
 
-void execute_gosub(interpreter_t *vi, gosub_t *s)
+void execute_gosub(interpreter_t *vi, const gosub_t *s)
 {
 
 }
@@ -1063,33 +1098,34 @@ void execute_return(interpreter_t *vi)
 
 }
 
-void execute_statement(interpreter_t *vi, statement_t *s)
+void execute_statement(interpreter_t *vi, const statement_t *s)
 {
     switch( s->kind ) {
-        case END:
+        case S_END:
             break;
-        case INPUT:
+        case S_INPUT:
             execute_input(vi, s->body.input);
             ++vi->pc;
             break;
-        case PRINT:
+        case S_PRINT:
             execute_print(vi, s->body.print);
             ++vi->pc;
             break;
-        case LET:
+        case S_LET:
             execute_let(vi, s->body.let);
             ++vi->pc;
             break;
-        case IF:
+        case S_IF:
             execute_if(vi, s->body.ifc);
             ++vi->pc;
-        case GOTO:
+            break;
+        case S_GOTO:
             execute_goto(vi, s->body.gotoc);
             break;
-        case GOSUB:
+        case S_GOSUB:
             execute_gosub(vi, s->body.gosub);
             break;
-        case RETURN:
+        case S_RETURN:
             execute_return(vi);
             break;
     }
@@ -1098,8 +1134,8 @@ void execute_statement(interpreter_t *vi, statement_t *s)
 void run(interpreter_t *vi)
 {
     while( true ) {
-        statement_t *s = get_elem(vi->program, vi->pc);
-        if( s->kind == END )
+        const statement_t *s = get_elem(vi->program, vi->pc);
+        if( s->kind == S_END )
             break;
         execute_statement(vi, s);
     }
