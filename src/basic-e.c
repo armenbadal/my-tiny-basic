@@ -645,6 +645,26 @@ bool match(parser_t *parser, token_t expected)
     return false;
 }
 
+bool match_any(parser_t *parser, size_t n, ...)
+{
+    bool matched = false;
+
+    va_list tokens;
+    va_start(tokens, n);
+
+    for( size_t i = 0; i < n; ++i ) {
+        token_t token = va_arg(tokens, token_t);
+        if( match(parser, token) ) {
+            matched = true;
+            break;
+        }
+    }
+
+    va_end(tokens);
+
+    return matched;
+}
+
 typedef unsigned int error_code_t;
 const error_code_t P_OK = 0;
 
@@ -750,6 +770,57 @@ result_t parse_expression(parser_t *parser)
     return rs;
 }
 
+result_t parse_comparison(parser_t *parser)
+{
+    result_t rl = parse_expression(parser);
+    if( failed(&rl) )
+        return result_with_error(0x0102);
+
+    token_t token = parser->lookahead.token;
+    if( !match_any(parser, 6, T_EQ, T_NE, T_GT, T_GE, T_LT, T_LE) ) {
+        destroy_expression(rl.item);
+        return result_with_error(0x0102);
+    }
+    operation_t oper = T_EQ;
+    switch( token ) {
+        case T_EQ:
+            oper = EQ;
+            break;
+        case T_NE:
+            oper = NE;
+            break;
+        case T_GT:
+            oper = GT;
+            break;
+        case T_GE:
+            oper = GE;
+            break;
+        case T_LT:
+            oper = LT;
+            break;
+        case T_LE:
+            oper = LE;
+            break;
+        default:
+            break;
+    }
+
+    result_t rr = parse_expression(parser);
+    if( failed(&rr) ) {
+        destroy_expression(rl.item);
+        return result_with_error(0x0102);
+    }
+
+    expression_t *comp = create_binary(oper, rl.item, rr.item);
+    if( NULL == comp ) {
+        destroy_expression(rl.item);
+        destroy_expression(rr.item);
+        return result_with_error(0x0102);
+    }
+
+    return result_with_ptr(comp);
+}
+
 result_t parse_end(parser_t *parser)
 {
     if( !match(parser, T_END) )
@@ -778,6 +849,7 @@ result_t parse_input(parser_t *parser)
         add_back(variables, create_variable(name));
     }
 
+    
     return result_with_ptr(create_input(variables));
 }
 
@@ -829,20 +901,27 @@ result_t parse_if(parser_t *parser)
     if( !match(parser, T_IF) )
         return result_with_error(0x010d);
 
-    result_t e0 = parse_expression(parser);
-    if( failed(&e0) )
-        return result_with_error(0x010e);
-
-    token_t t = parser->lookahead.token;
-    if( t >= T_EQ && t <= T_LE ) {
-        
-    }
-
-    result_t e1 = parse_expression(parser);
-    if( failed(&e1) )
+    result_t rc = parse_comparison(parser);
+    if( failed(&rc) )
         return result_with_error(0x010f);
 
-    return result_with_ptr(NULL);
+    if( !match(parser, T_THEN) )
+        return result_with_error(0x010f);
+
+    result_t ds = parse_statement(parser);
+    if( failed(&ds) ) {
+        destroy_expression(rc.item);
+        return result_with_error(0x010f);
+    }
+
+    statement_t *st = create_if(rc.item, ds.item, NULL);
+    if( NULL == st ) {
+        destroy_expression(rc.item);
+        destroy_statement(ds.item);
+        return result_with_error(0x010f);
+    }
+
+    return result_with_ptr(st);
 }
 
 result_t parse_goto(parser_t* parser)
