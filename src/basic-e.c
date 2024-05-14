@@ -19,6 +19,7 @@ factor = var | number | (expression)
 
 #include <ctype.h>
 #include <math.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -410,6 +411,7 @@ typedef enum _token {
     T_PRINT,
     T_LET,
     T_IF,
+    T_THEN,
     T_GOTO,
     T_GOSUB,
     T_RETURN,
