@@ -1,0 +1,7 @@
+10 INPUT a, b
+20 IF a > b THEN GOTO 50
+30 LET c = b
+40 GOTO 60
+50 LET c = a
+60 PRINT c
+70 END

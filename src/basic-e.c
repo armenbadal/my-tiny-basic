@@ -537,7 +537,7 @@ lexeme_t scan_identifier_or_name(scanner_t *scanner)
         ++p;
         advance(scanner);
     } while( isalpha(scanner->ch) );
-    retreat(scanner);
+    //retreat(scanner);
 
     if( strlen(buffer) == 1 )
         return (lexeme_t){ .token = T_NAME, .value.name = buffer[0] };
@@ -553,6 +553,8 @@ lexeme_t scan_identifier_or_name(scanner_t *scanner)
         kw.token = T_LET;
     else if( 0 == strcmp("IF", buffer) )
         kw.token = T_IF;
+    else if( 0 == strcmp("THEN", buffer) )
+        kw.token = T_THEN;
     else if( 0 == strcmp("GOTO", buffer) )
         kw.token = T_GOTO;
     else if( 0 == strcmp("GOSUB", buffer) )
@@ -903,7 +905,7 @@ result_t parse_print(parser_t *parser)
 
 result_t parse_let(parser_t *parser)
 {
-    if( !match(parser, T_PRINT) )
+    if( !match(parser, T_LET) )
         return result_with_error(0x0109);
 
     char name = parser->lookahead.value.name;
@@ -1008,6 +1010,7 @@ result_t parse_statement(parser_t *parser)
 
 result_t parse_line(parser_t *parser)
 {
+    unsigned int line = (unsigned int)parser->lookahead.value.number;
     if( !match(parser, T_INTEGER) )
         return result_with_error(0x0116);
     
@@ -1015,10 +1018,13 @@ result_t parse_line(parser_t *parser)
     if( failed(&rs) )
         return result_with_error(0x0117);
 
+    statement_t *st = (statement_t *)rs.item;
+    st->line = line;
+
     if( !match(parser, T_EOL) )
         return result_with_error(0x0118);
 
-    return result_with_ptr(rs.item);
+    return result_with_ptr(st);
 }
 
 result_t parse(parser_t *parser)
@@ -1039,12 +1045,14 @@ result_t parse(parser_t *parser)
     return result_with_ptr(program);
 }
 
+
 /* Ինտերպրետատոր */
 
 typedef struct _interpreter {
     vector_t *program;
     unsigned int pc;
     double environment[26];
+    unsigned int stack[16+1];
 } interpreter_t;
 
 interpreter_t *create_interpreter(vector_t *program)
@@ -1054,6 +1062,7 @@ interpreter_t *create_interpreter(vector_t *program)
     vi->program = program;
     vi->pc = 0;
     memset(vi->environment, 26, sizeof(double));
+    memset(vi->stack, 16+1, sizeof(unsigned int)); // review this
     return vi;
 }
 
@@ -1177,7 +1186,7 @@ void execute_if(interpreter_t *vi, const if_t *s)
     if( cond_val != 0 )
         execute_statement(vi, s->decision);
     else
-        execute_statement(vi, s->alternative);
+        vi->pc += 1;
 }
 
 void execute_goto(interpreter_t *vi, const goto_t *s)
@@ -1185,7 +1194,7 @@ void execute_goto(interpreter_t *vi, const goto_t *s)
     value_t val = evaluate_expression(vi, s->target);
     unsigned int line = (unsigned int)val;
     for(int i = 0; i < vi->program->count; ++i) {
-        const statement_t *s = (statement_t *)vi->program->items[i];
+        statement_t *s = (statement_t *)vi->program->items[i];
         if( s->line == line ) {
             vi->pc = i;
             break;
@@ -1195,12 +1204,24 @@ void execute_goto(interpreter_t *vi, const goto_t *s)
 
 void execute_gosub(interpreter_t *vi, const gosub_t *s)
 {
+    vi->stack[vi->stack[16]] = vi->pc + 1;
+    ++vi->stack[16];
 
+    value_t val = evaluate_expression(vi, s->target);
+    unsigned int line = (unsigned int)val;
+    for(int i = 0; i < vi->program->count; ++i) {
+        statement_t *s = (statement_t *)vi->program->items[i];
+        if( s->line == line ) {
+            vi->pc = i;
+            break;
+        }
+    }
 }
 
 void execute_return(interpreter_t *vi)
 {
-
+    --vi->stack[16];
+    vi->pc = vi->stack[vi->stack[16]];
 }
 
 void execute_statement(interpreter_t *vi, const statement_t *s)
@@ -1222,7 +1243,7 @@ void execute_statement(interpreter_t *vi, const statement_t *s)
             break;
         case S_IF:
             execute_if(vi, s->body.ifc);
-            ++vi->pc;
+            //++vi->pc;
             break;
         case S_GOTO:
             execute_goto(vi, s->body.gotoc);
