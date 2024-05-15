@@ -48,9 +48,19 @@ vector_t *create_vector(size_t cap)
     return vec;
 }
 
+bool is_empty(const vector_t *vec)
+{
+    return vec->count > 0;
+}
+
 void *get_elem(const vector_t *vec, size_t index)
 {
     return vec->items[index];
+}
+
+void *get_last(const vector_t *vec)
+{
+    return vec->items[vec->count - 1];
 }
 
 void add_back(vector_t *vec, void *el)
@@ -62,6 +72,16 @@ void add_back(vector_t *vec, void *el)
 
     vec->items[vec->count] = el;
     ++vec->count;
+}
+
+void *pop_last(vector_t *vec)
+{
+    if( is_empty(vec) )
+        return NULL;
+
+    void *last = get_last(vec);
+    --vec->count;
+    return last;
 }
 
 typedef void(*action_t)(void *);
@@ -80,8 +100,10 @@ void destroy_vector(vector_t *vec)
 
 void destroy_vector_and_elements(vector_t *vec, void(*destroyer)(void *))
 {
-    for_each_item(vec, destroyer);
-    destroy_vector(vec);
+    if( NULL != vec ) {
+        for_each_item(vec, destroyer);
+        destroy_vector(vec);
+    }
 }
 
 
@@ -781,7 +803,7 @@ result_t parse_comparison(parser_t *parser)
         destroy_expression(rl.item);
         return result_with_error(0x0102);
     }
-    operation_t oper = T_EQ;
+    operation_t oper = EQ;
     switch( token ) {
         case T_EQ:
             oper = EQ;
@@ -820,6 +842,8 @@ result_t parse_comparison(parser_t *parser)
 
     return result_with_ptr(comp);
 }
+
+result_t parse_statement(parser_t *parser);
 
 result_t parse_end(parser_t *parser)
 {
@@ -1223,32 +1247,57 @@ void run(interpreter_t *vi)
 }
 
 
+void execute_file(const char *file)
+{
+    scanner_t *scanner = NULL;
+    parser_t *parser = NULL;
+    vector_t *program = NULL;
+    interpreter_t *interpreter = NULL;
+
+    scanner = create_scanner(file);
+    if( NULL == scanner ) {
+        fprintf(stderr, "ERROR: Cannot open file: '%s'.", file);
+        goto cleanup;
+    }
+
+    parser = create_parser(scanner);
+    if( NULL == parser ) {
+        fprintf(stderr, "ERROR: Failed to parse the program.\n");
+        goto cleanup;
+    }
+
+    const result_t rs = parse(parser);
+    if( failed(&rs) ) {
+        fprintf(stderr, "ERROR: Failed to parse the program.\n");
+        goto cleanup;
+    }
+
+    // interprete
+    program = (vector_t *)rs.item;
+    interpreter = create_interpreter(rs.item);
+    if( NULL == interpreter ) {
+        goto cleanup;
+    }
+
+    run(interpreter);
+
+cleanup:
+    destroy_interpreter(interpreter);
+    destroy_vector_and_elements(program, (void(*)(void *))destroy_statement);
+    destroy_parser(parser);
+    destroy_scanner(scanner);
+}
 
 
 int main(int argc, char **argv)
 {
-    // if( argc < 2 ) {
-    //     printf("Tiny BASIC, 2024\n");
-    //     return 0;
-    // }
+    if( argc < 2 ) {
+        printf("Tiny BASIC, 2024\n");
+        return 0;
+    }
 
-    scanner_t *scanner = create_scanner("/home/armen/Projects/my-tiny-basic/cases/case01.bas");
-    parser_t *parser = create_parser(scanner);
-    const result_t rs = parse(parser);
-    if( failed(&rs) )
-        puts("Parse failed.");
-
-    // interprete
-    interpreter_t *vi = create_interpreter(rs.item);
-    run(vi);
-    destroy_interpreter(vi);
-
-    // cleanup
-    destroy_vector_and_elements(rs.item, (void(*)(void *))destroy_statement);
-    destroy_parser(parser);
-    destroy_scanner(scanner);
-    
-
+    execute_file(argv[1]);
+  
     return 0;
 }
 
