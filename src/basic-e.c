@@ -18,6 +18,7 @@ factor = var | number | (expression)
  */
 
 #include <ctype.h>
+#include <float.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -368,7 +369,7 @@ statement_t *create_goto(expression_t *tg)
 
 statement_t *create_gosub(expression_t *tg)
 {
-    statement_t *st = _create_statement(S_GOTO);
+    statement_t *st = _create_statement(S_GOSUB);
     st->body.gosub = malloc(sizeof(gosub_t));
     if( NULL == st->body.gosub ) {
         destroy_statement(st);
@@ -875,7 +876,6 @@ result_t parse_input(parser_t *parser)
         add_back(variables, create_variable(name));
     }
 
-    
     return result_with_ptr(create_input(variables));
 }
 
@@ -1102,10 +1102,10 @@ value_t evaluate_binary(interpreter_t *vi, binary_t *e)
             value = vleft / vright;
             break;
         case EQ:
-            value = vleft == vright;
+            value = fabs(vleft - vright) < DBL_EPSILON;
             break;
         case NE:
-            value = vleft != vright;
+            value = fabs(vleft - vright) >= DBL_EPSILON;
             break;
         case GT:
             value = vleft > vright;
@@ -1254,11 +1254,12 @@ void execute_statement(interpreter_t *vi, const statement_t *s)
 void run(interpreter_t *vi)
 {
     while( true ) {
-        const statement_t *s = get_elem(vi->program, vi->pc);
+        unsigned int line = vi->pc;
+        const statement_t *s = get_elem(vi->program, line);
         if( s->kind == S_END )
             break;
         execute_statement(vi, s);
-        if( !(s->kind == S_GOTO || s->kind == S_GOSUB || s->kind == S_RETURN) )
+        if( line == vi->pc )
             vi->pc += 1;
     }
 }
@@ -1308,12 +1309,14 @@ cleanup:
 
 int main(int argc, char **argv)
 {
+    execute_file("/home/armen/Projects/my-tiny-basic/cases/case03.bas");
+
     if( argc < 2 ) {
         printf("Tiny BASIC, 2024\n");
         return 0;
     }
 
-    execute_file(argv[1]);
+    //execute_file(argv[1]);
   
     return 0;
 }
