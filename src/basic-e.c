@@ -402,7 +402,7 @@ void destroy_statement(statement_t *s)
         case S_IF:
             destroy_expression(s->body.ifc->condition);
             destroy_statement(s->body.ifc->decision);
-            destroy_statement(s->body.ifc->alternative);
+            //destroy_statement(s->body.ifc->alternative);
             free(s->body.ifc);
             break;
         case S_GOTO:
@@ -1061,8 +1061,8 @@ interpreter_t *create_interpreter(vector_t *program)
     if( NULL == vi ) return NULL;
     vi->program = program;
     vi->pc = 0;
-    memset(vi->environment, 26, sizeof(double));
-    memset(vi->stack, 16+1, sizeof(unsigned int)); // review this
+    memset(vi->environment, 0, 26 * sizeof(double));
+    memset(vi->stack, 0, (16+1) * sizeof(unsigned int)); // review this
     return vi;
 }
 
@@ -1155,8 +1155,8 @@ void execute_statement(interpreter_t *vi, const statement_t *s);
 
 void execute_input(interpreter_t *vi, const input_t *s)
 {
+    printf("? ");
     for( int i = 0; i < s->variables->count; ++i ) {
-        printf("? ");
         double value = 0.0;
         scanf("%lf", &value);
         const expression_t *ex = (expression_t *)(s->variables->items[i]);
@@ -1185,8 +1185,6 @@ void execute_if(interpreter_t *vi, const if_t *s)
     value_t cond_val = evaluate_expression(vi, s->condition);
     if( cond_val != 0 )
         execute_statement(vi, s->decision);
-    else
-        vi->pc += 1;
 }
 
 void execute_goto(interpreter_t *vi, const goto_t *s)
@@ -1231,19 +1229,15 @@ void execute_statement(interpreter_t *vi, const statement_t *s)
             break;
         case S_INPUT:
             execute_input(vi, s->body.input);
-            ++vi->pc;
             break;
         case S_PRINT:
             execute_print(vi, s->body.print);
-            ++vi->pc;
             break;
         case S_LET:
             execute_let(vi, s->body.let);
-            ++vi->pc;
             break;
         case S_IF:
             execute_if(vi, s->body.ifc);
-            //++vi->pc;
             break;
         case S_GOTO:
             execute_goto(vi, s->body.gotoc);
@@ -1264,6 +1258,8 @@ void run(interpreter_t *vi)
         if( s->kind == S_END )
             break;
         execute_statement(vi, s);
+        if( !(s->kind == S_GOTO || s->kind == S_GOSUB || s->kind == S_RETURN) )
+            vi->pc += 1;
     }
 }
 
