@@ -452,7 +452,8 @@ typedef enum _token {
     T_RPAR,
     T_COMMA,
     T_EOL,
-    T_EOF
+    T_EOF,
+    T_REM
 } token_t;
 
 typedef struct _lexeme {
@@ -562,6 +563,8 @@ lexeme_t scan_identifier_or_name(scanner_t *scanner)
         kw.token = T_GOSUB;
     else if( 0 == strcmp("RETURN", buffer) )
         kw.token = T_RETURN;
+    else if( 0 == strcmp("REM", buffer) )
+        kw.token = T_REM;
 
     return kw;
 }
@@ -1014,6 +1017,17 @@ result_t parse_line(parser_t *parser)
     if( !match(parser, T_INTEGER) )
         return result_with_error(0x0116);
     
+    if( T_REM == parser->lookahead.token ) {
+        while( '\n' != parser->scanner->ch )
+            advance(parser->scanner);
+        parser->lookahead = next_lexeme(parser->scanner);
+        match(parser, T_EOL);
+
+        line = (unsigned int)parser->lookahead.value.number;
+        if( !match(parser, T_INTEGER) )
+            return result_with_error(0x0116);
+    }
+
     result_t rs = parse_statement(parser);
     if( failed(&rs) )
         return result_with_error(0x0117);
@@ -1264,7 +1278,6 @@ void run(interpreter_t *vi)
     }
 }
 
-
 void execute_file(const char *file)
 {
     scanner_t *scanner = NULL;
@@ -1309,14 +1322,14 @@ cleanup:
 
 int main(int argc, char **argv)
 {
-    execute_file("/home/armen/Projects/my-tiny-basic/cases/case03.bas");
+    execute_file("/home/armen/Projects/my-tiny-basic/cases/case01.bas");
 
     if( argc < 2 ) {
         printf("Tiny BASIC, 2024\n");
         return 0;
     }
 
-    //execute_file(argv[1]);
+    execute_file(argv[1]);
   
     return 0;
 }
