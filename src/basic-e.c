@@ -507,6 +507,12 @@ void retreat(scanner_t *scanner)
     ungetc(scanner->ch, scanner->source);
 }
 
+void skip_until(scanner_t* scanner, char c)
+{
+    while( c != scanner->ch )
+        advance(scanner);
+}
+
 lexeme_t scan_number(scanner_t *scanner)
 {
     int number = 0;
@@ -530,6 +536,30 @@ lexeme_t scan_number(scanner_t *scanner)
     return (lexeme_t){ .token = T_REAL, .value.number = number / k };
 }
 
+typedef struct _pair_of_text_and_token {
+    const char *text;
+    const token_t token;
+} pair_of_text_and_token_t;
+
+const pair_of_text_and_token_t keywords[] = {
+    {"END", T_END},
+    {"INPUT", T_INPUT},
+    {"PRINT", T_PRINT},
+    {"LET", T_LET},
+    {"IF", T_IF},
+    {"THEN", T_THEN},
+    {"GOTO", T_GOTO},
+    {"GOSUB", T_GOSUB},
+    {"RETURN", T_RETURN},
+    {"REM", T_REM},
+
+    {NULL, T_NONE}
+};
+
+const pair_of_text_and_token_t builtin_functions[] = {
+    {"SQR", T_NONE}
+};
+
 lexeme_t scan_identifier_or_name(scanner_t *scanner)
 {
     char buffer[40] = { 0 };
@@ -539,34 +569,15 @@ lexeme_t scan_identifier_or_name(scanner_t *scanner)
         ++p;
         advance(scanner);
     } while( isalpha(scanner->ch) );
-    //retreat(scanner);
 
     if( strlen(buffer) == 1 )
         return (lexeme_t){ .token = T_NAME, .value.name = buffer[0] };
 
-    lexeme_t kw = { .token = T_NONE };
-    if( 0 == strcmp("END", buffer) )
-        kw.token = T_END;
-    else if( 0 == strcmp("INPUT", buffer) )
-        kw.token = T_INPUT;
-    else if( 0 == strcmp("PRINT", buffer) )
-        kw.token = T_PRINT;
-    else if( 0 == strcmp("LET", buffer) )
-        kw.token = T_LET;
-    else if( 0 == strcmp("IF", buffer) )
-        kw.token = T_IF;
-    else if( 0 == strcmp("THEN", buffer) )
-        kw.token = T_THEN;
-    else if( 0 == strcmp("GOTO", buffer) )
-        kw.token = T_GOTO;
-    else if( 0 == strcmp("GOSUB", buffer) )
-        kw.token = T_GOSUB;
-    else if( 0 == strcmp("RETURN", buffer) )
-        kw.token = T_RETURN;
-    else if( 0 == strcmp("REM", buffer) )
-        kw.token = T_REM;
+    for( const pair_of_text_and_token_t *kw = keywords; kw->text != NULL; ++kw )
+        if( 0 == strcmp(kw->text, buffer) )
+            return (lexeme_t){ .token = kw->token };
 
-    return kw;
+    return (lexeme_t){ .token = T_NONE };
 }
 
 lexeme_t next_lexeme(scanner_t *scanner)
@@ -640,6 +651,7 @@ lexeme_t next_lexeme(scanner_t *scanner)
             break;
     }
     advance(scanner);
+
     return (lexeme_t){ .token = token };
 }
 
@@ -655,6 +667,7 @@ parser_t *create_parser(scanner_t *scanner)
     parser_t *parser = malloc(sizeof(parser_t));
     if( NULL == parser ) return NULL;
     parser->scanner = scanner;
+    parser->lookahead = (lexeme_t){ .token = T_NONE };
     return parser;
 }
 
@@ -1018,9 +1031,8 @@ result_t parse_line(parser_t *parser)
         return result_with_error(0x0116);
     
     if( T_REM == parser->lookahead.token ) {
-        while( '\n' != parser->scanner->ch )
-            advance(parser->scanner);
-        parser->lookahead = next_lexeme(parser->scanner);
+        skip_until(parser->scanner, '\n');
+        parser->lookahead.token = T_EOL;
         match(parser, T_EOL);
 
         line = (unsigned int)parser->lookahead.value.number;
@@ -1045,7 +1057,7 @@ result_t parse(parser_t *parser)
 {
     vector_t *program = create_vector(16);
 
-    parser->lookahead = next_lexeme(parser->scanner);
+    match(parser, T_NONE);
     while( parser->lookahead.token == T_INTEGER ) {
         result_t rs = parse_line(parser);
         if( failed(&rs) ) {
