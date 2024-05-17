@@ -149,6 +149,7 @@ struct _expression {
     union {
         double number;
         char name;
+        char *string;
         unary_t *unary;
         binary_t *binary;
     } value;
@@ -168,6 +169,13 @@ expression_t *create_number(double value)
 {
     expression_t *ex = _create_expression(E_NUMBER);
     ex->value.number = value;
+    return ex;
+}
+
+expression_t *create_string(char *str)
+{
+    expression_t *ex = _create_expression(E_STRING);
+    ex->value.string = str;
     return ex;
 }
 
@@ -559,7 +567,7 @@ lexeme_t scan_number(scanner_t *scanner)
         k *= 10;
         advance(scanner);
     }
-    retreat(scanner);
+
     return (lexeme_t){ .token = T_REAL, .value.number = number / k };
 }
 
@@ -798,6 +806,13 @@ result_t parse_factor(parser_t *parser)
         match(parser, token);
         expression_t *nm = create_number(num);
         return (result_t){ .item = nm, .ec = 0 };
+    }
+
+    if( T_STRING == token ) {
+        char *str = parser->lookahead.value.string;
+        match(parser, T_STRING);
+        expression_t *es = create_string(str);
+        return (result_t){ .item = es, .ec = 0 };
     }
 
     if( T_LPAR == token ) {
@@ -1082,7 +1097,7 @@ result_t parse_line(parser_t *parser)
         return result_with_error(0x0116);
     
     if( T_REM == parser->lookahead.token ) {
-        skip_until(parser->scanner, '\n');
+        skip_until(parser->scanner, '\n'); advance(parser->scanner);
         parser->lookahead.token = T_EOL;
         match(parser, T_EOL);
 
@@ -1124,10 +1139,23 @@ result_t parse(parser_t *parser)
 
 /* Ինտերպրետատոր */
 
+typedef enum _value_kind {
+    V_NUMBER,
+    V_TEXT
+} value_kind_t;
+
+typedef struct _value {
+    value_kind_t kind;
+    union {
+        double real;
+        char *text;
+    } v;
+} value_t;
+
 typedef struct _interpreter {
     program_t *program;
     unsigned int pc;
-    double environment[26];
+    value_t environment[26];
     unsigned int stack[16+1];
 } interpreter_t;
 
@@ -1147,14 +1175,13 @@ void destroy_interpreter(interpreter_t *vi)
     free(vi);
 }
 
-typedef double value_t;
 value_t evaluate_expression(interpreter_t *vi, expression_t *e);
 
 value_t evaluate_unary(interpreter_t *vi, unary_t *e)
 {
     value_t value = evaluate_expression(vi, e->subexpr);
-    if( e->operation == SUB )
-        value = -value;
+    if( value.kind == V_NUMBER && e->operation == SUB )
+        value.v.real *= -1;
     return value;
 }
 
@@ -1163,37 +1190,37 @@ value_t evaluate_binary(interpreter_t *vi, binary_t *e)
     value_t vleft = evaluate_expression(vi, e->left);
     value_t vright = evaluate_expression(vi, e->right);
 
-    value_t value = 0.0;
+    value_t value = { .kind = V_NUMBER, .v.real = 0.0 };
     switch( e->operation ) {
         case ADD:
-            value = vleft + vright;
+            value.v.real = vleft.v.real + vright.v.real;
             break;
         case SUB:
-            value = vleft - vright;
+            value.v.real = vleft.v.real - vright.v.real;
             break;
         case MUL:
-            value = vleft * vright;
+            value.v.real = vleft.v.real * vright.v.real;
             break;
         case DIV:
-            value = vleft / vright;
+            value.v.real = vleft.v.real / vright.v.real;
             break;
         case EQ:
-            value = fabs(vleft - vright) < DBL_EPSILON;
+            value.v.real = fabs(vleft.v.real - vright.v.real) < DBL_EPSILON;
             break;
         case NE:
-            value = fabs(vleft - vright) >= DBL_EPSILON;
+            value.v.real = fabs(vleft.v.real - vright.v.real) >= DBL_EPSILON;
             break;
         case GT:
-            value = vleft > vright;
+            value.v.real = vleft.v.real > vright.v.real;
             break;
         case GE:
-            value = vleft >= vright;
+            value.v.real = vleft.v.real >= vright.v.real;
             break;
         case LT:
-            value = vleft < vright;
+            value.v.real = vleft.v.real < vright.v.real;
             break;
         case LE: 
-            value = vleft <= vright;
+            value.v.real = vleft.v.real <= vright.v.real;
             break;
     }
 
@@ -1207,13 +1234,15 @@ size_t index_of(char name)
 
 value_t evaluate_expression(interpreter_t *vi, expression_t *e)
 {
-    value_t value = 0.0;
+    value_t value = { .kind = V_NUMBER, .v.real = 0.0 };
 
     switch( e->kind ) {
         case E_NUMBER:
-            value = e->value.number;
+            value.v.real = e->value.number;
             break;
         case E_STRING:
+            value.kind = V_TEXT;
+            value.v.text = e->value.string;
             break;
         case E_VARIABLE:
             value = vi->environment[index_of(e->value.name)];
@@ -1235,8 +1264,8 @@ void execute_input(interpreter_t *vi, const input_t *s)
 {
     printf("? ");
     for( int i = 0; i < s->variables->count; ++i ) {
-        double value = 0.0;
-        scanf("%lf", &value);
+        value_t value = { .kind = V_NUMBER, .v.real = 0.0 };
+        scanf("%lf", &value.v.real);
         const expression_t *ex = (expression_t *)(s->variables->items[i]);
         char name = ex->value.name;
         vi->environment[index_of(name)] = value;
@@ -1247,7 +1276,10 @@ void execute_print(interpreter_t *vi, const print_t *s)
 {
     for( int i = 0; i < s->expressions->count; ++i ) {
         value_t value = evaluate_expression(vi, s->expressions->items[i]);
-        printf("%lf\t", value);
+        if( value.kind == V_NUMBER )
+            printf("%lf\t", value.v.real);
+        else if( value.kind == V_TEXT )
+            printf("%s\t", value.v.text);
     }
     putchar('\n');
 }
@@ -1261,14 +1293,14 @@ void execute_let(interpreter_t *vi, const let_t *s)
 void execute_if(interpreter_t *vi, const if_t *s)
 {
     value_t cond_val = evaluate_expression(vi, s->condition);
-    if( cond_val != 0 )
+    if( cond_val.v.real != 0.0 )
         execute_statement(vi, s->decision);
 }
 
 void execute_goto(interpreter_t *vi, const goto_t *s)
 {
     value_t val = evaluate_expression(vi, s->target);
-    unsigned int line = (unsigned int)val;
+    unsigned int line = (unsigned int)val.v.real;
     for(int i = 0; i < vi->program->instructions->count; ++i) {
         statement_t *s = (statement_t *)vi->program->instructions->items[i];
         if( s->line == line ) {
@@ -1284,7 +1316,7 @@ void execute_gosub(interpreter_t *vi, const gosub_t *s)
     ++vi->stack[16];
 
     value_t val = evaluate_expression(vi, s->target);
-    unsigned int line = (unsigned int)val;
+    unsigned int line = (unsigned int)val.v.real;
     for(int i = 0; i < vi->program->instructions->count; ++i) {
         statement_t *s = (statement_t *)vi->program->instructions->items[i];
         if( s->line == line ) {
@@ -1386,6 +1418,8 @@ cleanup:
 
 int main(int argc, char **argv)
 {
+    //execute_file("/home/armen/Projects/my-tiny-basic/cases/case04.bas");
+
     if( argc < 2 ) {
         printf("Tiny BASIC, 2024\n");
         return 0;
