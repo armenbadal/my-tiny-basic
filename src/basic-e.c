@@ -423,6 +423,31 @@ void destroy_statement(statement_t *s)
 }
 
 
+typedef struct _program {
+    vector_t *instructions;
+    vector_t *strings;
+} program_t;
+
+program_t* create_program()
+{
+    program_t *prog = malloc(sizeof(program_t));
+    if( NULL != prog ) {
+        prog->instructions = create_vector(16);
+        prog->strings = create_vector(8);
+    }
+    return prog;
+}
+
+void destroy_program(program_t* prog)
+{
+    destroy_vector_and_elements(prog->instructions, &destroy_statement);
+    destroy_vector_and_elements(prog->strings, free);
+    free(prog);
+}
+
+
+/* Շարայուսական վերլուծություն */
+
 /* Լեքսեմը */
 typedef enum _token {
     T_NONE = 0,
@@ -465,8 +490,6 @@ typedef struct _lexeme {
     } value;
 } lexeme_t;
 
-
-/* Շարայուսական վերլուծություն */
 
 typedef struct _scanner {
     FILE *source;
@@ -1055,17 +1078,16 @@ result_t parse_line(parser_t *parser)
 
 result_t parse(parser_t *parser)
 {
-    vector_t *program = create_vector(16);
+    program_t *program = create_program();
 
     match(parser, T_NONE);
     while( parser->lookahead.token == T_INTEGER ) {
         result_t rs = parse_line(parser);
         if( failed(&rs) ) {
-            for_each_item(program, (action_t)destroy_statement);
-            destroy_vector(program);
+            destroy_program(program);
             return result_with_error(0x0120);
         }
-        add_back(program, rs.item);
+        add_back(program->instructions, rs.item);
     }
 
     return result_with_ptr(program);
@@ -1075,13 +1097,13 @@ result_t parse(parser_t *parser)
 /* Ինտերպրետատոր */
 
 typedef struct _interpreter {
-    vector_t *program;
+    program_t *program;
     unsigned int pc;
     double environment[26];
     unsigned int stack[16+1];
 } interpreter_t;
 
-interpreter_t *create_interpreter(vector_t *program)
+interpreter_t *create_interpreter(program_t *program)
 {
     interpreter_t *vi = malloc(sizeof(interpreter_t));
     if( NULL == vi ) return NULL;
@@ -1217,8 +1239,8 @@ void execute_goto(interpreter_t *vi, const goto_t *s)
 {
     value_t val = evaluate_expression(vi, s->target);
     unsigned int line = (unsigned int)val;
-    for(int i = 0; i < vi->program->count; ++i) {
-        statement_t *s = (statement_t *)vi->program->items[i];
+    for(int i = 0; i < vi->program->instructions->count; ++i) {
+        statement_t *s = (statement_t *)vi->program->instructions->items[i];
         if( s->line == line ) {
             vi->pc = i;
             break;
@@ -1233,8 +1255,8 @@ void execute_gosub(interpreter_t *vi, const gosub_t *s)
 
     value_t val = evaluate_expression(vi, s->target);
     unsigned int line = (unsigned int)val;
-    for(int i = 0; i < vi->program->count; ++i) {
-        statement_t *s = (statement_t *)vi->program->items[i];
+    for(int i = 0; i < vi->program->instructions->count; ++i) {
+        statement_t *s = (statement_t *)vi->program->instructions->items[i];
         if( s->line == line ) {
             vi->pc = i;
             break;
@@ -1281,7 +1303,7 @@ void run(interpreter_t *vi)
 {
     while( true ) {
         unsigned int line = vi->pc;
-        const statement_t *s = get_elem(vi->program, line);
+        const statement_t *s = get_elem(vi->program->instructions, line);
         if( s->kind == S_END )
             break;
         execute_statement(vi, s);
@@ -1294,7 +1316,7 @@ void execute_file(const char *file)
 {
     scanner_t *scanner = NULL;
     parser_t *parser = NULL;
-    vector_t *program = NULL;
+    program_t *program = NULL;
     interpreter_t *interpreter = NULL;
 
     scanner = create_scanner(file);
@@ -1316,8 +1338,8 @@ void execute_file(const char *file)
     }
 
     // interprete
-    program = (vector_t *)rs.item;
-    interpreter = create_interpreter(rs.item);
+    program = (program_t *)rs.item;
+    interpreter = create_interpreter(program);
     if( NULL == interpreter ) {
         goto cleanup;
     }
@@ -1326,7 +1348,7 @@ void execute_file(const char *file)
 
 cleanup:
     destroy_interpreter(interpreter);
-    destroy_vector_and_elements(program, (void(*)(void *))destroy_statement);
+    destroy_program(program);
     destroy_parser(parser);
     destroy_scanner(scanner);
 }
