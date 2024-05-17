@@ -112,6 +112,7 @@ void destroy_vector_and_elements(vector_t *vec, void(*destroyer)(void *))
 
 typedef enum _expression_kind {
     E_NUMBER,
+    E_STRING,
     E_VARIABLE,
     E_UNARY,
     E_BINARY
@@ -440,9 +441,11 @@ program_t* create_program()
 
 void destroy_program(program_t* prog)
 {
-    destroy_vector_and_elements(prog->instructions, &destroy_statement);
-    destroy_vector_and_elements(prog->strings, free);
-    free(prog);
+    if( prog != NULL ) {
+        destroy_vector_and_elements(prog->instructions, &destroy_statement);
+        destroy_vector_and_elements(prog->strings, &free);
+        free(prog);
+    }
 }
 
 
@@ -453,6 +456,7 @@ typedef enum _token {
     T_NONE = 0,
     T_INTEGER,
     T_REAL,
+    T_STRING,
     T_NAME,
     T_END,
     T_INPUT,
@@ -486,7 +490,7 @@ typedef struct _lexeme {
     union {
         char name;
         double number;
-        size_t label;
+        char *string;
     } value;
 } lexeme_t;
 
@@ -603,6 +607,27 @@ lexeme_t scan_identifier_or_name(scanner_t *scanner)
     return (lexeme_t){ .token = T_NONE };
 }
 
+lexeme_t scan_string(scanner_t* scanner)
+{
+    advance(scanner);
+
+    char buffer[128] = { 0 };
+    char *p = buffer;
+    while( '"' != scanner->ch ) {
+        *p = scanner->ch;
+        ++p;
+        advance(scanner);
+    }
+    advance(scanner);
+
+    lexeme_t str= {
+        .token = T_STRING,
+        .value.string = malloc(1 + strlen(buffer))
+    };
+    strcpy(str.value.string, buffer);
+    return str;
+}
+
 lexeme_t next_lexeme(scanner_t *scanner)
 {
     while( ' ' == scanner->ch || '\t' == scanner->ch )
@@ -622,6 +647,9 @@ lexeme_t next_lexeme(scanner_t *scanner)
 
     if( isalpha(scanner->ch) )
         return scan_identifier_or_name(scanner);
+
+    if( '"' == scanner->ch )
+        return scan_string(scanner);
 
     // գործողություններ
     token_t token = T_NONE;
@@ -1185,6 +1213,8 @@ value_t evaluate_expression(interpreter_t *vi, expression_t *e)
         case E_NUMBER:
             value = e->value.number;
             break;
+        case E_STRING:
+            break;
         case E_VARIABLE:
             value = vi->environment[index_of(e->value.name)];
             break;
@@ -1356,8 +1386,6 @@ cleanup:
 
 int main(int argc, char **argv)
 {
-    execute_file("/home/armen/Projects/my-tiny-basic/cases/case01.bas");
-
     if( argc < 2 ) {
         printf("Tiny BASIC, 2024\n");
         return 0;
