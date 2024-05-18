@@ -115,7 +115,8 @@ typedef enum _expression_kind {
     E_STRING,
     E_VARIABLE,
     E_UNARY,
-    E_BINARY
+    E_BINARY,
+    E_BUILTIN
 } expression_kind_t;
 
 typedef struct _expression expression_t;
@@ -144,6 +145,11 @@ typedef struct _binary {
     expression_t *right;
 } binary_t;
 
+typedef struct _builtin {
+    char name[32];
+    vector_t *arguments;
+} builtin_t;
+
 struct _expression {
     expression_kind_t kind;
     union {
@@ -152,6 +158,7 @@ struct _expression {
         char *string;
         unary_t *unary;
         binary_t *binary;
+        builtin_t *call;
     } value;
 };
 
@@ -213,6 +220,19 @@ expression_t *create_binary(operation_t op, expression_t *l, expression_t *r)
     return ex;
 }
 
+expression_t *create_builtin_call(const char *name, vector_t *args)
+{
+    expression_t *ex = _create_expression(E_BUILTIN);
+    ex->value.call = malloc(sizeof(builtin_t));
+    if( NULL == ex->value.call ) {
+        destroy_expression(ex);
+        return NULL;
+    }
+    strcpy(ex->value.call->name, name);
+    ex->value.call->arguments = args;
+    return ex;
+}
+
 void destroy_unary(unary_t *ue)
 {
     destroy_expression(ue->subexpr);
@@ -226,6 +246,12 @@ void destroy_binary(binary_t *be)
     free(be);
 }
 
+void destroy_builtin(builtin_t *bi)
+{
+    for_each_item(bi->arguments, (action_t)&destroy_expression);
+    free(bi);
+}
+
 void destroy_expression(expression_t *expr)
 {
     if( E_STRING == expr->kind )
@@ -234,6 +260,8 @@ void destroy_expression(expression_t *expr)
         destroy_unary(expr->value.unary);
     else if( E_BINARY == expr->kind )
         destroy_binary(expr->value.binary);
+    else if( E_BUILTIN == expr->kind )
+        destroy_builtin(expr->value.call);
     free(expr);
 }
 
@@ -468,13 +496,14 @@ typedef enum _token {
     T_COMMA,
     T_EOL,
     T_EOF,
-    T_REM
+    T_REM,
+    T_BUILTIN
 } token_t;
 
 typedef struct _lexeme {
     token_t token;
     union {
-        char name;
+        char name[32];
         double number;
         char *string;
     } value;
@@ -570,25 +599,40 @@ const pair_of_text_and_token_t keywords[] = {
 };
 
 const pair_of_text_and_token_t builtin_functions[] = {
-    {"SQR", T_NONE}
+    {"SQR", T_BUILTIN},
+
+    {NULL, T_NONE}
 };
 
 lexeme_t scan_identifier_or_name(scanner_t *scanner)
 {
-    char buffer[40] = { 0 };
-    char *p = buffer;
+    lexeme_t lex;
+    memset(&lex, 0, sizeof(lexeme_t));
+
+    char *p = lex.value.name;
     do {
         *p = scanner->ch;
         ++p;
         advance(scanner);
     } while( isalpha(scanner->ch) );
+    *p = '\0';
 
-    if( strlen(buffer) == 1 )
-        return (lexeme_t){ .token = T_NAME, .value.name = buffer[0] };
+    if( strlen(lex.value.name) == 1 ) {
+        lex.token = T_NAME;
+        return lex;
+    }
 
     for( const pair_of_text_and_token_t *kw = keywords; kw->text != NULL; ++kw )
-        if( 0 == strcmp(kw->text, buffer) )
-            return (lexeme_t){ .token = kw->token };
+        if( 0 == strcmp(kw->text, lex.value.name) ) {
+            lex.token = kw->token;
+            return lex;
+        }
+
+    for( const pair_of_text_and_token_t *kw = builtin_functions; kw->text != NULL; ++kw )
+        if( 0 == strcmp(kw->text, lex.value.name) ) {
+            lex.token = T_BUILTIN;
+            return lex;
+        }
 
     return (lexeme_t){ .token = T_NONE };
 }
@@ -702,7 +746,9 @@ typedef enum _error_code {
     R_EXPECTED_NAME,
     R_EXPECTED_EQ,
     R_EXPECTED_RELOP,
-    R_EXPECTED_COMMAND
+    R_EXPECTED_COMMAND,
+    R_EXPECTET_LPAR,
+    R_EXPECTET_RPAR
 } error_code_t;
 
 const char *const error_message[] = {
@@ -714,6 +760,8 @@ const char *const error_message[] = {
     "Սպասվում է «=»",
     "Սպասվում է համեմատության գործողություն",
     "Հրամանը պետք է սկսվի ծառայողական բառով",
+    "Սպասվում է «(»",
+    "Սպասվում է «)»",
     NULL
 };
 
@@ -816,7 +864,7 @@ result_t parse_expression(parser_t *parser);
 result_t parse_factor(parser_t *parser)
 {
     if( has(parser, T_NAME) ) {
-        char name = parser->lookahead.value.name;
+        char name = parser->lookahead.value.name[0];
         match(parser, T_NAME);
         expression_t *vr = create_variable(name);
         return (result_t){ .item = vr, .ec = 0 };
@@ -834,6 +882,38 @@ result_t parse_factor(parser_t *parser)
         match(parser, T_STRING);
         expression_t *es = create_string(str);
         return (result_t){ .item = es, .ec = 0 };
+    }
+
+    if( has(parser, T_BUILTIN) ) {
+        char name[32] = { 0 };
+        strcpy(name, parser->lookahead.value.name);
+        match(parser, T_BUILTIN);
+
+        if( !match(parser, T_LPAR) )
+            return result_with_error(R_EXPECTET_LPAR);
+        vector_t *args = create_vector(4);
+        result_t re = parse_expression(parser);
+        if( failed(&re) ) {
+            destroy_vector(args);
+            return re;
+        }
+        add_back(args, re.item);
+        while( has(parser, T_COMMA) ) {
+            match(parser, T_COMMA);
+            re = parse_expression(parser);
+            if( failed(&re) ) {
+                destroy_vector_and_elements(args, (action_t)&destroy_expression);
+                return re;
+            }
+            add_back(args, re.item);
+        }
+        if( !match(parser, T_RPAR) ) {
+            destroy_vector_and_elements(args, (action_t)&destroy_expression);
+            return result_with_error(R_EXPECTET_RPAR);
+        }
+
+        expression_t *bic = create_builtin_call(name, args);
+        return result_with_ptr(bic);
     }
 
     if( has(parser, T_LPAR) ) {
@@ -959,14 +1039,14 @@ result_t parse_input(parser_t *parser)
 
     vector_t *variables = create_vector(4);
 
-    char name = parser->lookahead.value.name;
+    char name = parser->lookahead.value.name[0];
     if( !match(parser, T_NAME) )
         return result_with_error(R_EXPECTED_NAME);
     add_back(variables, create_variable(name));
 
     while( has(parser, T_COMMA) ) {
         match(parser, T_COMMA);
-        name = parser->lookahead.value.name;
+        name = parser->lookahead.value.name[0];
         if( !match(parser, T_NAME) ) {
             for_each_item(variables, (action_t)destroy_expression);
             return result_with_error(R_EXPECTED_NAME);
@@ -1005,7 +1085,7 @@ result_t parse_let(parser_t *parser)
 {
     match(parser, T_LET);
 
-    char name = parser->lookahead.value.name;
+    char name = parser->lookahead.value.name[0];
     if( !match(parser, T_NAME) )
         return result_with_error(R_EXPECTED_NAME);
 
@@ -1234,6 +1314,17 @@ value_t evaluate_binary(interpreter_t *vi, binary_t *e)
     return value;
 }
 
+value_t evaluate_builtin_call(interpreter_t *vi, builtin_t *bi)
+{
+    if( 0 == strcmp(bi->name, "SQR") ) {
+        value_t val = evaluate_expression(vi, get_elem(bi->arguments, 0));
+        val.v.real = sqrt(val.v.real);
+        return val;
+    }
+
+    return (value_t){ .kind = V_NUMBER, .v.real = 0.0 };
+}
+
 size_t index_of(char name)
 {
     return toupper(name) - 'A';
@@ -1259,6 +1350,9 @@ value_t evaluate_expression(interpreter_t *vi, expression_t *e)
             break;
         case E_BINARY:
             value = evaluate_binary(vi, e->value.binary);
+            break;
+        case E_BUILTIN:
+            value = evaluate_builtin_call(vi, e->value.call);
             break;
     }
 
@@ -1425,7 +1519,7 @@ cleanup:
 
 int main(int argc, char **argv)
 {
-    execute_file("/home/armen/Projects/my-tiny-basic/cases/case04.bas");
+    execute_file("/home/armen/Projects/my-tiny-basic/cases/case05.bas");
 
     if( argc < 2 ) {
         printf("Tiny BASIC, 2024\n");
