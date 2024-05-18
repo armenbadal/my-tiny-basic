@@ -99,7 +99,7 @@ void destroy_vector(vector_t *vec)
     free(vec);
 }
 
-void destroy_vector_and_elements(vector_t *vec, void(*destroyer)(void *))
+void destroy_vector_and_elements(vector_t *vec, action_t destroyer)
 {
     if( NULL != vec ) {
         for_each_item(vec, destroyer);
@@ -228,7 +228,9 @@ void destroy_binary(binary_t *be)
 
 void destroy_expression(expression_t *expr)
 {
-    if( E_UNARY == expr->kind )
+    if( E_STRING == expr->kind )
+        free(expr->value.string);
+    else if( E_UNARY == expr->kind )
         destroy_unary(expr->value.unary);
     else if( E_BINARY == expr->kind )
         destroy_binary(expr->value.binary);
@@ -431,31 +433,7 @@ void destroy_statement(statement_t *s)
     free(s);
 }
 
-
-typedef struct _program {
-    vector_t *instructions;
-    vector_t *strings;
-} program_t;
-
-program_t* create_program()
-{
-    program_t *prog = malloc(sizeof(program_t));
-    if( NULL != prog ) {
-        prog->instructions = create_vector(16);
-        prog->strings = create_vector(8);
-    }
-    return prog;
-}
-
-void destroy_program(program_t* prog)
-{
-    if( prog != NULL ) {
-        destroy_vector_and_elements(prog->instructions, &destroy_statement);
-        destroy_vector_and_elements(prog->strings, &free);
-        free(prog);
-    }
-}
-
+typedef vector_t program_t;
 
 /* Շարայուսական վերլուծություն */
 
@@ -716,9 +694,33 @@ lexeme_t next_lexeme(scanner_t *scanner)
 
 
 
+typedef enum _error_code {
+    R_OK = 0,
+    R_MANDATORY_LINE_NUMBER,
+    R_MANDATORY_END_OF_LINE,
+    R_EXPECTED_THEN,
+    R_EXPECTED_NAME,
+    R_EXPECTED_EQ,
+    R_EXPECTED_RELOP,
+    R_EXPECTED_COMMAND
+} error_code_t;
+
+const char *const error_message[] = {
+    "Ok",
+    "Տողը պետք է սկսվի թվով",
+    "Հրամանը պետք է ավարտվի նոր տողի նիշով",
+    "Սպասվում է THEN",
+    "Սպասվում է իդենտիֆիկատոր",
+    "Սպասվում է «=»",
+    "Սպասվում է համեմատության գործողություն",
+    "Հրամանը պետք է սկսվի ծառայողական բառով",
+    NULL
+};
+
 typedef struct _parser {
     scanner_t *scanner;
     lexeme_t lookahead;
+    size_t line;
 } parser_t;
 
 parser_t *create_parser(scanner_t *scanner)
@@ -727,6 +729,7 @@ parser_t *create_parser(scanner_t *scanner)
     if( NULL == parser ) return NULL;
     parser->scanner = scanner;
     parser->lookahead = (lexeme_t){ .token = T_NONE };
+    parser->line = 0;
     return parser;
 }
 
@@ -735,9 +738,32 @@ void destroy_parser(parser_t *parser)
     free(parser);
 }
 
+bool has(const parser_t *parser, token_t expected)
+{
+    return expected == parser->lookahead.token;
+}
+
+bool has_any_of(const parser_t *parser, size_t n, ...)
+{
+    va_list tokens;
+    va_start(tokens, n);
+
+    bool found = false;
+    for( size_t i = 0; i < n; ++i ) {
+        if( has(parser, va_arg(tokens, token_t)) ) {
+            found = true;
+            break;
+        }
+    }
+
+    va_end(tokens);
+
+    return found;
+}
+
 bool match(parser_t *parser, token_t expected)
 {
-    if( parser->lookahead.token == expected ) {
+    if( has(parser, expected) ) {
         parser->lookahead = next_lexeme(parser->scanner);
         return true;
     }
@@ -765,9 +791,6 @@ bool match_any(parser_t *parser, size_t n, ...)
     return matched;
 }
 
-typedef unsigned int error_code_t;
-const error_code_t P_OK = 0;
-
 typedef struct _result {
     void *item;
     error_code_t ec; 
@@ -775,12 +798,12 @@ typedef struct _result {
 
 bool failed(const result_t *r)
 {
-    return P_OK != r->ec;
+    return R_OK != r->ec;
 }
 
 result_t result_with_ptr(void *p)
 {
-    return (result_t){ .item = p, .ec = P_OK };
+    return (result_t){ .item = p, .ec = R_OK };
 }
 
 result_t result_with_error(error_code_t ec)
@@ -792,33 +815,31 @@ result_t parse_expression(parser_t *parser);
 
 result_t parse_factor(parser_t *parser)
 {
-    token_t token = parser->lookahead.token;
-
-    if( T_NAME == parser->lookahead.token ) {
+    if( has(parser, T_NAME) ) {
         char name = parser->lookahead.value.name;
         match(parser, T_NAME);
         expression_t *vr = create_variable(name);
         return (result_t){ .item = vr, .ec = 0 };
     }
 
-    if( T_INTEGER == token || T_REAL == token ) {
+    if( has_any_of(parser, 2, T_INTEGER, T_REAL) ) {
         double num = parser->lookahead.value.number;
-        match(parser, token);
+        match_any(parser, 2, T_INTEGER, T_REAL);
         expression_t *nm = create_number(num);
         return (result_t){ .item = nm, .ec = 0 };
     }
 
-    if( T_STRING == token ) {
+    if( has(parser, T_STRING) ) {
         char *str = parser->lookahead.value.string;
         match(parser, T_STRING);
         expression_t *es = create_string(str);
         return (result_t){ .item = es, .ec = 0 };
     }
 
-    if( T_LPAR == token ) {
+    if( has(parser, T_LPAR) ) {
         match(parser, T_LPAR);
         result_t rs = parse_expression(parser);
-        if( rs.ec != P_OK )
+        if( rs.ec != R_OK )
             return rs;
         if( !match(parser, T_RPAR) ) {
             destroy_expression(rs.item);
@@ -833,14 +854,14 @@ result_t parse_factor(parser_t *parser)
 result_t parse_term(parser_t *parser)
 {
     result_t rs = parse_factor(parser);
-    if( rs.ec != P_OK )
+    if( rs.ec != R_OK )
         return rs;
 
-    while( T_MUL == parser->lookahead.token || T_DIV == parser->lookahead.token ) {
+    while( has_any_of(parser, 2, T_MUL, T_DIV) ) {
         operation_t oper = T_DIV == parser->lookahead.token ? DIV : MUL;
-        match(parser, parser->lookahead.token);
+        match_any(parser, 2, T_MUL, T_DIV);
         result_t r2 = parse_factor(parser);
-        if( r2.ec != P_OK )
+        if( r2.ec != R_OK )
             return r2;
         rs.item = create_binary(oper, rs.item, r2.item);
     }
@@ -851,26 +872,28 @@ result_t parse_term(parser_t *parser)
 result_t parse_expression(parser_t *parser)
 {
     operation_t unop = ADD;
-    if( T_ADD == parser->lookahead.token )
+    if( has(parser, T_ADD) )
         match(parser, T_ADD);
-    else if( T_SUB == parser->lookahead.token ) {
+    else if( has(parser, T_SUB) ) {
         unop = SUB;
         match(parser, T_SUB);
     }
 
     result_t rs = parse_term(parser);
-    if( rs.ec != P_OK )
+    if( failed(&rs) )
         return rs;
     
     if( SUB == unop )
         rs.item = create_unary(unop, rs.item);
 
-    while( T_ADD == parser->lookahead.token || T_SUB == parser->lookahead.token ) {
+    while( has_any_of(parser, 2, T_ADD, T_SUB) ) {
         operation_t oper = T_ADD == parser->lookahead.token ? ADD : SUB;
-        match(parser, parser->lookahead.token);
+        match_any(parser, 2, T_ADD, T_SUB);
         result_t r2 = parse_term(parser);
-        if( r2.ec != P_OK )
+        if( failed(&r2) ) {
+            destroy_expression(rs.item);
             return r2;
+        }
         rs.item = create_binary(oper, rs.item, r2.item);
     }
 
@@ -881,12 +904,12 @@ result_t parse_comparison(parser_t *parser)
 {
     result_t rl = parse_expression(parser);
     if( failed(&rl) )
-        return result_with_error(0x0102);
+        return rl;
 
     token_t token = parser->lookahead.token;
     if( !match_any(parser, 6, T_EQ, T_NE, T_GT, T_GE, T_LT, T_LE) ) {
         destroy_expression(rl.item);
-        return result_with_error(0x0102);
+        return result_with_error(R_EXPECTED_RELOP);
     }
     operation_t oper = EQ;
     switch( token ) {
@@ -915,16 +938,10 @@ result_t parse_comparison(parser_t *parser)
     result_t rr = parse_expression(parser);
     if( failed(&rr) ) {
         destroy_expression(rl.item);
-        return result_with_error(0x0102);
+        return rr;
     }
 
     expression_t *comp = create_binary(oper, rl.item, rr.item);
-    if( NULL == comp ) {
-        destroy_expression(rl.item);
-        destroy_expression(rr.item);
-        return result_with_error(0x0102);
-    }
-
     return result_with_ptr(comp);
 }
 
@@ -932,29 +949,28 @@ result_t parse_statement(parser_t *parser);
 
 result_t parse_end(parser_t *parser)
 {
-    if( !match(parser, T_END) )
-        return result_with_error(0x0102);
-    
+    match(parser, T_END);    
     return result_with_ptr(create_end());
 }
 
 result_t parse_input(parser_t *parser)
 {
-    if( !match(parser, T_INPUT) )
-        return result_with_error(0x0103);
+    match(parser, T_INPUT);
 
     vector_t *variables = create_vector(4);
 
     char name = parser->lookahead.value.name;
     if( !match(parser, T_NAME) )
-        return result_with_error(0x0104);
+        return result_with_error(R_EXPECTED_NAME);
     add_back(variables, create_variable(name));
 
-    while( T_COMMA == parser->lookahead.token ) {
+    while( has(parser, T_COMMA) ) {
         match(parser, T_COMMA);
         name = parser->lookahead.value.name;
-        if( !match(parser, T_NAME) )
-            return result_with_error(0x0105);
+        if( !match(parser, T_NAME) ) {
+            for_each_item(variables, (action_t)destroy_expression);
+            return result_with_error(R_EXPECTED_NAME);
+        }
         add_back(variables, create_variable(name));
     }
 
@@ -963,21 +979,21 @@ result_t parse_input(parser_t *parser)
 
 result_t parse_print(parser_t *parser)
 {
-    if( !match(parser, T_PRINT) )
-        return result_with_error(0x0106);
+    match(parser, T_PRINT);
 
     result_t rs = parse_expression(parser);
-    if( rs.ec != P_OK )
-        return result_with_error(0x0107);
+    if( failed(&rs) )
+        return rs;
+
     vector_t *exprs = create_vector(4);
     add_back(exprs, rs.item);
 
-    while( T_COMMA == parser->lookahead.token ) {
+    while( has(parser, T_COMMA) ) {
         match(parser, T_COMMA);
         result_t r2 = parse_expression(parser);
-        if( r2.ec != P_OK ) {
+        if( failed(&r2) ) {
             for_each_item(exprs, (action_t)destroy_expression);
-            return result_with_error(0x0108);
+            return r2;
         }
         add_back(exprs, r2.item);
     }
@@ -987,80 +1003,70 @@ result_t parse_print(parser_t *parser)
 
 result_t parse_let(parser_t *parser)
 {
-    if( !match(parser, T_LET) )
-        return result_with_error(0x0109);
+    match(parser, T_LET);
 
     char name = parser->lookahead.value.name;
     if( !match(parser, T_NAME) )
-        return result_with_error(0x010a);
+        return result_with_error(R_EXPECTED_NAME);
 
     if( !match(parser, T_EQ) )
-        return result_with_error(0x010b);
+        return result_with_error(R_EXPECTED_EQ);
 
     result_t rs = parse_expression(parser);
-    if( rs.ec != P_OK )
-        return result_with_error(0x010c);
+    if( failed(&rs) )
+        return rs;
 
     return result_with_ptr(create_let(name, rs.item));
 }
 
 result_t parse_if(parser_t *parser)
 {
-    if( !match(parser, T_IF) )
-        return result_with_error(0x010d);
+    match(parser, T_IF);
 
     result_t rc = parse_comparison(parser);
     if( failed(&rc) )
-        return result_with_error(0x010f);
+        return rc;
 
-    if( !match(parser, T_THEN) )
-        return result_with_error(0x010f);
+    if( !match(parser, T_THEN) ) {
+        destroy_expression(rc.item);
+        return result_with_error(R_EXPECTED_THEN);
+    }
 
     result_t ds = parse_statement(parser);
     if( failed(&ds) ) {
         destroy_expression(rc.item);
-        return result_with_error(0x010f);
+        return ds;
     }
 
     statement_t *st = create_if(rc.item, ds.item, NULL);
-    if( NULL == st ) {
-        destroy_expression(rc.item);
-        destroy_statement(ds.item);
-        return result_with_error(0x010f);
-    }
-
     return result_with_ptr(st);
 }
 
 result_t parse_goto(parser_t* parser)
 {
-    if( !match(parser, T_GOTO) )
-        return result_with_error(0x0110);
+    match(parser, T_GOTO);
 
     result_t rs = parse_expression(parser);
     if( failed(&rs) )
-        return result_with_error(0x111);
+        return rs;
 
     return result_with_ptr(create_goto(rs.item));
 }
 
 result_t parse_gosub(parser_t* parser)
 {
-    if( !match(parser, T_GOSUB) )
-        return result_with_error(0x0112);
+    match(parser, T_GOSUB);
 
     result_t rs = parse_expression(parser);
     if( failed(&rs) )
-        return result_with_error(0x113);
+        return rs;
 
     return result_with_ptr(create_gosub(rs.item));
 }
 
 result_t parse_return(parser_t* parser)
 {
-    if( !match(parser, T_RETURN) )
-        return result_with_error(0x0114);
-
+    match(parser, T_RETURN);
     return result_with_ptr(create_return());
 }
 
@@ -1087,50 +1093,51 @@ result_t parse_statement(parser_t *parser)
             break;
     }
 
-    return result_with_error(0x0115);
+    return result_with_error(R_EXPECTED_COMMAND);
 }
 
 result_t parse_line(parser_t *parser)
 {
-    unsigned int line = (unsigned int)parser->lookahead.value.number;
+    parser->line = (unsigned int)parser->lookahead.value.number;
     if( !match(parser, T_INTEGER) )
-        return result_with_error(0x0116);
+        return result_with_error(R_MANDATORY_LINE_NUMBER);
     
     if( T_REM == parser->lookahead.token ) {
-        skip_until(parser->scanner, '\n'); advance(parser->scanner);
+        skip_until(parser->scanner, '\n');
+        advance(parser->scanner);
         parser->lookahead.token = T_EOL;
         match(parser, T_EOL);
 
-        line = (unsigned int)parser->lookahead.value.number;
+        parser->line = (unsigned int)parser->lookahead.value.number;
         if( !match(parser, T_INTEGER) )
-            return result_with_error(0x0116);
+            return result_with_error(R_MANDATORY_LINE_NUMBER);
     }
 
     result_t rs = parse_statement(parser);
     if( failed(&rs) )
-        return result_with_error(0x0117);
+        return rs;
 
     statement_t *st = (statement_t *)rs.item;
-    st->line = line;
+    st->line = parser->line;
 
     if( !match(parser, T_EOL) )
-        return result_with_error(0x0118);
+        return result_with_error(R_MANDATORY_END_OF_LINE);
 
     return result_with_ptr(st);
 }
 
 result_t parse(parser_t *parser)
 {
-    program_t *program = create_program();
+    program_t *program = create_vector(16);
 
     match(parser, T_NONE);
-    while( parser->lookahead.token == T_INTEGER ) {
+    while( has(parser, T_INTEGER) ) {
         result_t rs = parse_line(parser);
         if( failed(&rs) ) {
-            destroy_program(program);
-            return result_with_error(0x0120);
+            destroy_vector_and_elements(program, (action_t)&destroy_statement);
+            return rs;
         }
-        add_back(program->instructions, rs.item);
+        add_back(program, rs.item);
     }
 
     return result_with_ptr(program);
@@ -1301,8 +1308,8 @@ void execute_goto(interpreter_t *vi, const goto_t *s)
 {
     value_t val = evaluate_expression(vi, s->target);
     unsigned int line = (unsigned int)val.v.real;
-    for(int i = 0; i < vi->program->instructions->count; ++i) {
-        statement_t *s = (statement_t *)vi->program->instructions->items[i];
+    for(int i = 0; i < vi->program->count; ++i) {
+        statement_t *s = (statement_t *)vi->program->items[i];
         if( s->line == line ) {
             vi->pc = i;
             break;
@@ -1317,8 +1324,8 @@ void execute_gosub(interpreter_t *vi, const gosub_t *s)
 
     value_t val = evaluate_expression(vi, s->target);
     unsigned int line = (unsigned int)val.v.real;
-    for(int i = 0; i < vi->program->instructions->count; ++i) {
-        statement_t *s = (statement_t *)vi->program->instructions->items[i];
+    for(int i = 0; i < vi->program->count; ++i) {
+        statement_t *s = (statement_t *)vi->program->items[i];
         if( s->line == line ) {
             vi->pc = i;
             break;
@@ -1365,7 +1372,7 @@ void run(interpreter_t *vi)
 {
     while( true ) {
         unsigned int line = vi->pc;
-        const statement_t *s = get_elem(vi->program->instructions, line);
+        const statement_t *s = get_elem(vi->program, line);
         if( s->kind == S_END )
             break;
         execute_statement(vi, s);
@@ -1395,7 +1402,7 @@ void execute_file(const char *file)
 
     const result_t rs = parse(parser);
     if( failed(&rs) ) {
-        fprintf(stderr, "ERROR: Failed to parse the program.\n");
+        fprintf(stderr, "ERROR: %s:\n", error_message[rs.ec]);
         goto cleanup;
     }
 
@@ -1410,7 +1417,7 @@ void execute_file(const char *file)
 
 cleanup:
     destroy_interpreter(interpreter);
-    destroy_program(program);
+    destroy_vector_and_elements(program, (action_t)&destroy_statement);
     destroy_parser(parser);
     destroy_scanner(scanner);
 }
@@ -1418,7 +1425,7 @@ cleanup:
 
 int main(int argc, char **argv)
 {
-    //execute_file("/home/armen/Projects/my-tiny-basic/cases/case04.bas");
+    execute_file("/home/armen/Projects/my-tiny-basic/cases/case04.bas");
 
     if( argc < 2 ) {
         printf("Tiny BASIC, 2024\n");

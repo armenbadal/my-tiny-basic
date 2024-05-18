@@ -2,7 +2,8 @@ SOURCES = basic-e.c
 
 BASIC = basic
 
-CFLAGS = -std=gnu17 -gdwarf-2 -Wall -fprofile-arcs -ftest-coverage
+CFLAGS = -std=gnu17 -gdwarf-2 -Wall
+# -fprofile-arcs -ftest-coverage
 
 all: $(BASIC)
 
