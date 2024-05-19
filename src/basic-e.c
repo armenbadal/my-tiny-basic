@@ -1,6 +1,8 @@
 /*
  * Tiny BASIC, 2024
 
+Original grammar:
+
 line = number statement NL | statement NL.
 statement = PRINT expr-list
     | IF expression relop expression THEN statement
