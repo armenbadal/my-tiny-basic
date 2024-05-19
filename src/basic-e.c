@@ -861,72 +861,107 @@ result_t result_with_error(error_code_t ec)
 
 result_t parse_expression(parser_t *parser);
 
-result_t parse_factor(parser_t *parser)
+result_t parse_name(parser_t *parser)
 {
-    if( has(parser, T_NAME) ) {
-        char name = parser->lookahead.value.name[0];
-        match(parser, T_NAME);
-        expression_t *vr = create_variable(name);
-        return (result_t){ .item = vr, .ec = 0 };
+    char name = parser->lookahead.value.name[0];
+    match(parser, T_NAME);
+    expression_t *vr = create_variable(name);
+    return (result_t){ .item = vr, .ec = 0 };
+}
+
+result_t parse_number(parser_t *parser)
+{
+    double num = parser->lookahead.value.number;
+    match_any(parser, 2, T_INTEGER, T_REAL);
+    expression_t *nm = create_number(num);
+    return (result_t){ .item = nm, .ec = 0 };
+}
+
+result_t parse_string(parser_t *parser)
+{
+    char *str = parser->lookahead.value.string;
+    match(parser, T_STRING);
+    expression_t *es = create_string(str);
+    return (result_t){ .item = es, .ec = 0 };
+}
+
+result_t parse_expression_list(parser_t *parser)
+{
+    vector_t *exprs = create_vector(4);
+
+    result_t re = parse_expression(parser);
+    if( failed(&re) ) {
+        destroy_vector(exprs);
+        return re;
     }
+    add_back(exprs, re.item);
 
-    if( has_any_of(parser, 2, T_INTEGER, T_REAL) ) {
-        double num = parser->lookahead.value.number;
-        match_any(parser, 2, T_INTEGER, T_REAL);
-        expression_t *nm = create_number(num);
-        return (result_t){ .item = nm, .ec = 0 };
-    }
-
-    if( has(parser, T_STRING) ) {
-        char *str = parser->lookahead.value.string;
-        match(parser, T_STRING);
-        expression_t *es = create_string(str);
-        return (result_t){ .item = es, .ec = 0 };
-    }
-
-    if( has(parser, T_BUILTIN) ) {
-        char name[32] = { 0 };
-        strcpy(name, parser->lookahead.value.name);
-        match(parser, T_BUILTIN);
-
-        if( !match(parser, T_LPAR) )
-            return result_with_error(R_EXPECTET_LPAR);
-        vector_t *args = create_vector(4);
-        result_t re = parse_expression(parser);
+    while( has(parser, T_COMMA) ) {
+        match(parser, T_COMMA);
+        re = parse_expression(parser);
         if( failed(&re) ) {
-            destroy_vector(args);
+            destroy_vector_and_elements(exprs, (action_t)&destroy_expression);
             return re;
         }
-        add_back(args, re.item);
-        while( has(parser, T_COMMA) ) {
-            match(parser, T_COMMA);
-            re = parse_expression(parser);
-            if( failed(&re) ) {
-                destroy_vector_and_elements(args, (action_t)&destroy_expression);
-                return re;
-            }
-            add_back(args, re.item);
-        }
-        if( !match(parser, T_RPAR) ) {
-            destroy_vector_and_elements(args, (action_t)&destroy_expression);
-            return result_with_error(R_EXPECTET_RPAR);
-        }
-
-        expression_t *bic = create_builtin_call(name, args);
-        return result_with_ptr(bic);
+        add_back(exprs, re.item);
     }
 
-    if( has(parser, T_LPAR) ) {
-        match(parser, T_LPAR);
-        result_t rs = parse_expression(parser);
-        if( rs.ec != R_OK )
-            return rs;
-        if( !match(parser, T_RPAR) ) {
-            destroy_expression(rs.item);
-            return (result_t){ .item = NULL, .ec = 0x0101 };
-        }
+    return result_with_ptr(exprs);
+}
+
+result_t parse_builtin_call(parser_t *parser)
+{
+    char name[32] = { 0 };
+    strcpy(name, parser->lookahead.value.name);
+    match(parser, T_BUILTIN);
+
+    if( !match(parser, T_LPAR) )
+        return result_with_error(R_EXPECTET_LPAR);
+
+    result_t rel = parse_expression_list(parser);
+    if( failed(&rel) )
+        return rel;
+
+    vector_t *args = rel.item;
+
+    if( !match(parser, T_RPAR) ) {
+        destroy_vector_and_elements(args, (action_t)&destroy_expression);
+        return result_with_error(R_EXPECTET_RPAR);
+    }
+
+    expression_t *bic = create_builtin_call(name, args);
+    return result_with_ptr(bic);
+}
+
+result_t parse_parenthesed(parser_t *parser)
+{
+    match(parser, T_LPAR);
+    result_t rs = parse_expression(parser);
+    if( rs.ec != R_OK )
         return rs;
+    if( !match(parser, T_RPAR) ) {
+        destroy_expression(rs.item);
+        return (result_t){ .item = NULL, .ec = 0x0101 };
     }
+    return rs;
+}
+
+result_t parse_factor(parser_t *parser)
+{
+    if( has(parser, T_NAME) )
+        return parse_name(parser);
+
+    if( has_any_of(parser, 2, T_INTEGER, T_REAL) ) 
+        return parse_number(parser);
+
+    if( has(parser, T_STRING) )
+        return parse_string(parser);
+
+    if( has(parser, T_BUILTIN) )
+        return parse_builtin_call(parser);
+
+    if( has(parser, T_LPAR) )
+        return parse_parenthesed(parser);
 
     return (result_t){ .item = NULL, .ec = 0 };
 }
@@ -1061,24 +1096,11 @@ result_t parse_print(parser_t *parser)
 {
     match(parser, T_PRINT);
 
-    result_t rs = parse_expression(parser);
-    if( failed(&rs) )
-        return rs;
+    result_t rel = parse_expression_list(parser);
+    if( failed(&rel) )
+        return rel;
 
-    vector_t *exprs = create_vector(4);
-    add_back(exprs, rs.item);
-
-    while( has(parser, T_COMMA) ) {
-        match(parser, T_COMMA);
-        result_t r2 = parse_expression(parser);
-        if( failed(&r2) ) {
-            for_each_item(exprs, (action_t)destroy_expression);
-            return r2;
-        }
-        add_back(exprs, r2.item);
-    }
-
-    return result_with_ptr(create_print(exprs));
+    return result_with_ptr(create_print(rel.item));
 }
 
 result_t parse_let(parser_t *parser)
