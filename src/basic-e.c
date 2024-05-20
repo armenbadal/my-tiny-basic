@@ -161,7 +161,7 @@ struct _expression {
         unary_t *unary;
         binary_t *binary;
         builtin_t *call;
-    } value;
+    };
 };
 
 expression_t *_create_expression(expression_kind_t kind)
@@ -177,61 +177,61 @@ void destroy_expression(expression_t *expr);
 expression_t *create_number(double value)
 {
     expression_t *ex = _create_expression(E_NUMBER);
-    ex->value.number = value;
+    ex->number = value;
     return ex;
 }
 
 expression_t *create_string(char *str)
 {
     expression_t *ex = _create_expression(E_STRING);
-    ex->value.string = str;
+    ex->string = str;
     return ex;
 }
 
 expression_t *create_variable(char name)
 {
     expression_t *ex = _create_expression(E_VARIABLE);
-    ex->value.name = name;
+    ex->name = name;
     return ex;
 }
 
 expression_t *create_unary(operation_t op, expression_t *se)
 {
     expression_t *ex = _create_expression(E_UNARY);
-    ex->value.unary = malloc(sizeof(unary_t));
-    if( NULL == ex->value.unary ) {
+    ex->unary = malloc(sizeof(unary_t));
+    if( NULL == ex->unary ) {
         destroy_expression(ex);
         return NULL;
     }
-    ex->value.unary->operation = op;
-    ex->value.unary->subexpr = se;
+    ex->unary->operation = op;
+    ex->unary->subexpr = se;
     return ex;
 }
 
 expression_t *create_binary(operation_t op, expression_t *l, expression_t *r)
 {
     expression_t *ex = _create_expression(E_BINARY);
-    ex->value.binary = malloc(sizeof(binary_t));
-    if( NULL == ex->value.binary ) {
+    ex->binary = malloc(sizeof(binary_t));
+    if( NULL == ex->binary ) {
         destroy_expression(ex);
         return NULL;
     }
-    ex->value.binary->operation = op;
-    ex->value.binary->left = l;
-    ex->value.binary->right = r;
+    ex->binary->operation = op;
+    ex->binary->left = l;
+    ex->binary->right = r;
     return ex;
 }
 
 expression_t *create_builtin_call(const char *name, vector_t *args)
 {
     expression_t *ex = _create_expression(E_BUILTIN);
-    ex->value.call = malloc(sizeof(builtin_t));
-    if( NULL == ex->value.call ) {
+    ex->call = malloc(sizeof(builtin_t));
+    if( NULL == ex->call ) {
         destroy_expression(ex);
         return NULL;
     }
-    strcpy(ex->value.call->name, name);
-    ex->value.call->arguments = args;
+    strcpy(ex->call->name, name);
+    ex->call->arguments = args;
     return ex;
 }
 
@@ -257,13 +257,13 @@ void destroy_builtin(builtin_t *bi)
 void destroy_expression(expression_t *expr)
 {
     if( E_STRING == expr->kind )
-        free(expr->value.string);
+        free(expr->string);
     else if( E_UNARY == expr->kind )
-        destroy_unary(expr->value.unary);
+        destroy_unary(expr->unary);
     else if( E_BINARY == expr->kind )
-        destroy_binary(expr->value.binary);
+        destroy_binary(expr->binary);
     else if( E_BUILTIN == expr->kind )
-        destroy_builtin(expr->value.call);
+        destroy_builtin(expr->call);
     free(expr);
 }
 
@@ -318,17 +318,8 @@ struct _statement {
         if_t *ifc;
         goto_t *gotoc;
         gosub_t *gosub;
-    } body;
+    };
 };
-
-/*
-#define s_input(s) (s)->body.input
-#define s_print(s) (s)->body.print
-#define s_let(s) (s)->body.let
-#define s_if(s) (s)->body.ifc
-#define s_goto(s) (s)->body.gotoc
-#define s_gosub(s) (s)->body.gosub
-*/
 
 statement_t *_create_statement(statement_kind_t kind)
 {
@@ -348,75 +339,75 @@ statement_t *create_end()
 statement_t *create_input(vector_t *vars)
 {
     statement_t *st = _create_statement(S_INPUT);
-    st->body.input = malloc(sizeof(input_t));
-    if( NULL == st->body.input ) {
+    st->input = malloc(sizeof(input_t));
+    if( NULL == st->input ) {
         destroy_statement(st);
         return NULL;
     }
-    st->body.input->variables = vars;
+    st->input->variables = vars;
     return st;
 }
 
 statement_t *create_print(vector_t *exprs)
 {
     statement_t *st = _create_statement(S_PRINT);
-    st->body.print = malloc(sizeof(print_t));
-    if( NULL == st->body.print ) {
+    st->print = malloc(sizeof(print_t));
+    if( NULL == st->print ) {
         destroy_statement(st);
         return NULL;
     }
-    st->body.print->expressions = exprs;
+    st->print->expressions = exprs;
     return st;
 }
 
 statement_t *create_let(char var, expression_t *expr)
 {
     statement_t *st = _create_statement(S_LET);
-    st->body.let = malloc(sizeof(let_t));
-    if( NULL == st->body.let ) {
+    st->let = malloc(sizeof(let_t));
+    if( NULL == st->let ) {
         destroy_statement(st);
         return NULL;
     }
-    st->body.let->variable = var;
-    st->body.let->right = expr;
+    st->let->variable = var;
+    st->let->right = expr;
     return st;
 }
 
 statement_t *create_if(expression_t *cond, statement_t *dec, statement_t *alt)
 {
     statement_t *st = _create_statement(S_IF);
-    st->body.ifc = malloc(sizeof(if_t));
-    if( NULL == st->body.ifc ) {
+    st->ifc = malloc(sizeof(if_t));
+    if( NULL == st->ifc ) {
         destroy_statement(st);
         return NULL;
     }
-    st->body.ifc->condition = cond;
-    st->body.ifc->decision = dec;
-    st->body.ifc->alternative = alt;
+    st->ifc->condition = cond;
+    st->ifc->decision = dec;
+    st->ifc->alternative = alt;
     return st;
 }
 
 statement_t *create_goto(expression_t *tg)
 {
     statement_t *st = _create_statement(S_GOTO);
-    st->body.gotoc = malloc(sizeof(goto_t));
-    if( NULL == st->body.gotoc ) {
+    st->gotoc = malloc(sizeof(goto_t));
+    if( NULL == st->gotoc ) {
         destroy_statement(st);
         return NULL;
     }
-    st->body.gotoc->target = tg;
+    st->gotoc->target = tg;
     return st;
 }
 
 statement_t *create_gosub(expression_t *tg)
 {
     statement_t *st = _create_statement(S_GOSUB);
-    st->body.gosub = malloc(sizeof(gosub_t));
-    if( NULL == st->body.gosub ) {
+    st->gosub = malloc(sizeof(gosub_t));
+    if( NULL == st->gosub ) {
         destroy_statement(st);
         return NULL;
     }
-    st->body.gosub->target = tg;
+    st->gosub->target = tg;
     return st;
 }
 
@@ -429,31 +420,31 @@ void destroy_statement(statement_t *s)
 {
     switch( s->kind ) {
         case S_INPUT:
-            destroy_vector_and_elements(s->body.input->variables, free);
-            free(s->body.input);
+            destroy_vector_and_elements(s->input->variables, free);
+            free(s->input);
             break;
         case S_PRINT:
-            destroy_vector_and_elements(s->body.print->expressions,
+            destroy_vector_and_elements(s->print->expressions,
                                         (action_t)destroy_expression);
-            free(s->body.print);
+            free(s->print);
             break;
         case S_LET:
-            destroy_expression(s->body.let->right);
-            free(s->body.let);
+            destroy_expression(s->let->right);
+            free(s->let);
             break;
         case S_IF:
-            destroy_expression(s->body.ifc->condition);
-            destroy_statement(s->body.ifc->decision);
-            //destroy_statement(s->body.ifc->alternative);
-            free(s->body.ifc);
+            destroy_expression(s->ifc->condition);
+            destroy_statement(s->ifc->decision);
+            //destroy_statement(s->ifc->alternative);
+            free(s->ifc);
             break;
         case S_GOTO:
-            destroy_expression(s->body.gotoc->target);
-            free(s->body.gotoc);
+            destroy_expression(s->gotoc->target);
+            free(s->gotoc);
             break;
         case S_GOSUB:
-            destroy_expression(s->body.gosub->target);
-            free(s->body.gotoc);
+            destroy_expression(s->gosub->target);
+            free(s->gotoc);
             break;
         case S_END:
         case S_RETURN:
@@ -508,7 +499,7 @@ typedef struct _lexeme {
         char name[32];
         double number;
         char *string;
-    } value;
+    };
 } lexeme_t;
 
 
@@ -566,7 +557,7 @@ lexeme_t scan_number(scanner_t *scanner)
     } while( isdigit(scanner->ch) );
     if( '.' != scanner->ch ) {
         retreat(scanner);
-        return (lexeme_t){ .token = T_INTEGER, .value.number = number };
+        return (lexeme_t){ .token = T_INTEGER, .number = number };
     }
 
     double k = 1;
@@ -577,7 +568,7 @@ lexeme_t scan_number(scanner_t *scanner)
         advance(scanner);
     }
 
-    return (lexeme_t){ .token = T_REAL, .value.number = number / k };
+    return (lexeme_t){ .token = T_REAL, .number = number / k };
 }
 
 typedef struct _pair_of_text_and_token {
@@ -611,7 +602,7 @@ lexeme_t scan_identifier_or_name(scanner_t *scanner)
     lexeme_t lex;
     memset(&lex, 0, sizeof(lexeme_t));
 
-    char *p = lex.value.name;
+    char *p = lex.name;
     do {
         *p = scanner->ch;
         ++p;
@@ -619,19 +610,19 @@ lexeme_t scan_identifier_or_name(scanner_t *scanner)
     } while( isalpha(scanner->ch) );
     *p = '\0';
 
-    if( strlen(lex.value.name) == 1 ) {
+    if( strlen(lex.name) == 1 ) {
         lex.token = T_NAME;
         return lex;
     }
 
     for( const pair_of_text_and_token_t *kw = keywords; kw->text != NULL; ++kw )
-        if( 0 == strcmp(kw->text, lex.value.name) ) {
+        if( 0 == strcmp(kw->text, lex.name) ) {
             lex.token = kw->token;
             return lex;
         }
 
     for( const pair_of_text_and_token_t *kw = builtin_functions; kw->text != NULL; ++kw )
-        if( 0 == strcmp(kw->text, lex.value.name) ) {
+        if( 0 == strcmp(kw->text, lex.name) ) {
             lex.token = T_BUILTIN;
             return lex;
         }
@@ -654,9 +645,9 @@ lexeme_t scan_string(scanner_t* scanner)
 
     lexeme_t str= {
         .token = T_STRING,
-        .value.string = malloc(1 + strlen(buffer))
+        .string = malloc(1 + strlen(buffer))
     };
-    strcpy(str.value.string, buffer);
+    strcpy(str.string, buffer);
     return str;
 }
 
@@ -770,7 +761,7 @@ const char *const error_message[] = {
 typedef struct _parser {
     scanner_t *scanner;
     lexeme_t lookahead;
-    size_t line;
+    unsigned int line;
 } parser_t;
 
 parser_t *create_parser(scanner_t *scanner)
@@ -865,7 +856,7 @@ result_t parse_expression(parser_t *parser);
 
 result_t parse_name(parser_t *parser)
 {
-    char name = parser->lookahead.value.name[0];
+    char name = parser->lookahead.name[0];
     match(parser, T_NAME);
     expression_t *vr = create_variable(name);
     return (result_t){ .item = vr, .ec = 0 };
@@ -873,7 +864,7 @@ result_t parse_name(parser_t *parser)
 
 result_t parse_number(parser_t *parser)
 {
-    double num = parser->lookahead.value.number;
+    double num = parser->lookahead.number;
     match_any(parser, 2, T_INTEGER, T_REAL);
     expression_t *nm = create_number(num);
     return (result_t){ .item = nm, .ec = 0 };
@@ -881,7 +872,7 @@ result_t parse_number(parser_t *parser)
 
 result_t parse_string(parser_t *parser)
 {
-    char *str = parser->lookahead.value.string;
+    char *str = parser->lookahead.string;
     match(parser, T_STRING);
     expression_t *es = create_string(str);
     return (result_t){ .item = es, .ec = 0 };
@@ -914,7 +905,7 @@ result_t parse_expression_list(parser_t *parser)
 result_t parse_builtin_call(parser_t *parser)
 {
     char name[32] = { 0 };
-    strcpy(name, parser->lookahead.value.name);
+    strcpy(name, parser->lookahead.name);
     match(parser, T_BUILTIN);
 
     if( !match(parser, T_LPAR) )
@@ -1076,14 +1067,14 @@ result_t parse_input(parser_t *parser)
 
     vector_t *variables = create_vector(4);
 
-    char name = parser->lookahead.value.name[0];
+    char name = parser->lookahead.name[0];
     if( !match(parser, T_NAME) )
         return result_with_error(R_EXPECTED_NAME);
     add_back(variables, create_variable(name));
 
     while( has(parser, T_COMMA) ) {
         match(parser, T_COMMA);
-        name = parser->lookahead.value.name[0];
+        name = parser->lookahead.name[0];
         if( !match(parser, T_NAME) ) {
             for_each_item(variables, (action_t)destroy_expression);
             return result_with_error(R_EXPECTED_NAME);
@@ -1109,7 +1100,7 @@ result_t parse_let(parser_t *parser)
 {
     match(parser, T_LET);
 
-    char name = parser->lookahead.value.name[0];
+    char name = parser->lookahead.name[0];
     if( !match(parser, T_NAME) )
         return result_with_error(R_EXPECTED_NAME);
 
@@ -1202,7 +1193,7 @@ result_t parse_statement(parser_t *parser)
 
 result_t parse_line(parser_t *parser)
 {
-    parser->line = (unsigned int)parser->lookahead.value.number;
+    parser->line = (unsigned int)parser->lookahead.number;
     if( !match(parser, T_INTEGER) )
         return result_with_error(R_MANDATORY_LINE_NUMBER);
     
@@ -1212,7 +1203,7 @@ result_t parse_line(parser_t *parser)
         parser->lookahead.token = T_EOL;
         match(parser, T_EOL);
 
-        parser->line = (unsigned int)parser->lookahead.value.number;
+        parser->line = (unsigned int)parser->lookahead.number;
         if( !match(parser, T_INTEGER) )
             return result_with_error(R_MANDATORY_LINE_NUMBER);
     }
@@ -1260,7 +1251,7 @@ typedef struct _value {
     union {
         double real;
         char *text;
-    } v;
+    };
 } value_t;
 
 typedef struct _interpreter {
@@ -1292,7 +1283,7 @@ value_t evaluate_unary(interpreter_t *vi, unary_t *e)
 {
     value_t value = evaluate_expression(vi, e->subexpr);
     if( value.kind == V_NUMBER && e->operation == SUB )
-        value.v.real *= -1;
+        value.real *= -1;
     return value;
 }
 
@@ -1301,52 +1292,52 @@ value_t evaluate_binary(interpreter_t *vi, binary_t *e)
     value_t vleft = evaluate_expression(vi, e->left);
     value_t vright = evaluate_expression(vi, e->right);
 
-    value_t value = { .kind = V_NUMBER, .v.real = 0.0 };
+    value_t value = { .kind = V_NUMBER, .real = 0.0 };
     switch( e->operation ) {
         case ADD:
-            value.v.real = vleft.v.real + vright.v.real;
+            value.real = vleft.real + vright.real;
             break;
         case SUB:
-            value.v.real = vleft.v.real - vright.v.real;
+            value.real = vleft.real - vright.real;
             break;
         case MUL:
-            value.v.real = vleft.v.real * vright.v.real;
+            value.real = vleft.real * vright.real;
             break;
         case DIV:
-            value.v.real = vleft.v.real / vright.v.real;
+            value.real = vleft.real / vright.real;
             break;
         case EQ:
-            value.v.real = fabs(vleft.v.real - vright.v.real) < DBL_EPSILON;
+            value.real = fabs(vleft.real - vright.real) < DBL_EPSILON;
             break;
         case NE:
-            value.v.real = fabs(vleft.v.real - vright.v.real) >= DBL_EPSILON;
+            value.real = fabs(vleft.real - vright.real) >= DBL_EPSILON;
             break;
         case GT:
-            value.v.real = vleft.v.real > vright.v.real;
+            value.real = vleft.real > vright.real;
             break;
         case GE:
-            value.v.real = vleft.v.real >= vright.v.real;
+            value.real = vleft.real >= vright.real;
             break;
         case LT:
-            value.v.real = vleft.v.real < vright.v.real;
+            value.real = vleft.real < vright.real;
             break;
         case LE: 
-            value.v.real = vleft.v.real <= vright.v.real;
+            value.real = vleft.real <= vright.real;
             break;
     }
 
     return value;
 }
 
-value_t evaluate_builtin_call(interpreter_t *vi, builtin_t *bi)
+value_t evaluate_builtin_call(interpreter_t *vi, const builtin_t *bi)
 {
     if( 0 == strcmp(bi->name, "SQR") ) {
         value_t val = evaluate_expression(vi, get_elem(bi->arguments, 0));
-        val.v.real = sqrt(val.v.real);
+        val.real = sqrt(val.real);
         return val;
     }
 
-    return (value_t){ .kind = V_NUMBER, .v.real = 0.0 };
+    return (value_t){ .kind = V_NUMBER, .real = 0.0 };
 }
 
 size_t index_of(char name)
@@ -1356,27 +1347,27 @@ size_t index_of(char name)
 
 value_t evaluate_expression(interpreter_t *vi, expression_t *e)
 {
-    value_t value = { .kind = V_NUMBER, .v.real = 0.0 };
+    value_t value = { .kind = V_NUMBER, .real = 0.0 };
 
     switch( e->kind ) {
         case E_NUMBER:
-            value.v.real = e->value.number;
+            value.real = e->number;
             break;
         case E_STRING:
             value.kind = V_TEXT;
-            value.v.text = e->value.string;
+            value.text = e->string;
             break;
         case E_VARIABLE:
-            value = vi->environment[index_of(e->value.name)];
+            value = vi->environment[index_of(e->name)];
             break;
         case E_UNARY:
-            value = evaluate_unary(vi, e->value.unary);
+            value = evaluate_unary(vi, e->unary);
             break;
         case E_BINARY:
-            value = evaluate_binary(vi, e->value.binary);
+            value = evaluate_binary(vi, e->binary);
             break;
         case E_BUILTIN:
-            value = evaluate_builtin_call(vi, e->value.call);
+            value = evaluate_builtin_call(vi, e->call);
             break;
     }
 
@@ -1389,10 +1380,10 @@ void execute_input(interpreter_t *vi, const input_t *s)
 {
     printf("? ");
     for( int i = 0; i < s->variables->count; ++i ) {
-        value_t value = { .kind = V_NUMBER, .v.real = 0.0 };
-        scanf("%lf", &value.v.real);
+        value_t value = { .kind = V_NUMBER, .real = 0.0 };
+        scanf("%lf", &value.real);
         const expression_t *ex = (expression_t *)(s->variables->items[i]);
-        char name = ex->value.name;
+        char name = ex->name;
         vi->environment[index_of(name)] = value;
     }
 }
@@ -1402,9 +1393,9 @@ void execute_print(interpreter_t *vi, const print_t *s)
     for( int i = 0; i < s->expressions->count; ++i ) {
         value_t value = evaluate_expression(vi, s->expressions->items[i]);
         if( value.kind == V_NUMBER )
-            printf("%lf\t", value.v.real);
+            printf("%lf\t", value.real);
         else if( value.kind == V_TEXT )
-            printf("%s\t", value.v.text);
+            printf("%s\t", value.text);
     }
     putchar('\n');
 }
@@ -1418,21 +1409,25 @@ void execute_let(interpreter_t *vi, const let_t *s)
 void execute_if(interpreter_t *vi, const if_t *s)
 {
     value_t cond_val = evaluate_expression(vi, s->condition);
-    if( cond_val.v.real != 0.0 )
+    if( cond_val.real != 0.0 )
         execute_statement(vi, s->decision);
+}
+
+int search_program_line(const interpreter_t* vi, unsigned int line)
+{
+    for(int i = 0; i < vi->program->count; ++i) {
+        const statement_t *s = vi->program->items[i];
+        if( s->line == line )
+            return i;
+    }
+
+    return -1;
 }
 
 void execute_goto(interpreter_t *vi, const goto_t *s)
 {
     value_t val = evaluate_expression(vi, s->target);
-    unsigned int line = (unsigned int)val.v.real;
-    for(int i = 0; i < vi->program->count; ++i) {
-        statement_t *s = (statement_t *)vi->program->items[i];
-        if( s->line == line ) {
-            vi->pc = i;
-            break;
-        }
-    }
+    vi->pc = search_program_line(vi, (unsigned int)val.real);
 }
 
 void execute_gosub(interpreter_t *vi, const gosub_t *s)
@@ -1441,14 +1436,7 @@ void execute_gosub(interpreter_t *vi, const gosub_t *s)
     ++vi->stack[16];
 
     value_t val = evaluate_expression(vi, s->target);
-    unsigned int line = (unsigned int)val.v.real;
-    for(int i = 0; i < vi->program->count; ++i) {
-        statement_t *s = (statement_t *)vi->program->items[i];
-        if( s->line == line ) {
-            vi->pc = i;
-            break;
-        }
-    }
+    vi->pc = search_program_line(vi, (unsigned int)val.real);
 }
 
 void execute_return(interpreter_t *vi)
@@ -1463,22 +1451,22 @@ void execute_statement(interpreter_t *vi, const statement_t *s)
         case S_END:
             break;
         case S_INPUT:
-            execute_input(vi, s->body.input);
+            execute_input(vi, s->input);
             break;
         case S_PRINT:
-            execute_print(vi, s->body.print);
+            execute_print(vi, s->print);
             break;
         case S_LET:
-            execute_let(vi, s->body.let);
+            execute_let(vi, s->let);
             break;
         case S_IF:
-            execute_if(vi, s->body.ifc);
+            execute_if(vi, s->ifc);
             break;
         case S_GOTO:
-            execute_goto(vi, s->body.gotoc);
+            execute_goto(vi, s->gotoc);
             break;
         case S_GOSUB:
-            execute_gosub(vi, s->body.gosub);
+            execute_gosub(vi, s->gosub);
             break;
         case S_RETURN:
             execute_return(vi);
@@ -1543,8 +1531,6 @@ cleanup:
 
 int main(int argc, char **argv)
 {
-    execute_file("/home/armen/Projects/my-tiny-basic/cases/case05.bas");
-
     if( argc < 2 ) {
         printf("Tiny BASIC, 2024\n");
         return 0;
