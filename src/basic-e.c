@@ -270,6 +270,7 @@ void destroy_expression(expression_t *expr)
 
 typedef enum _statement_kind {
     S_END = 0,
+    S_DIM,
     S_INPUT,
     S_PRINT,
     S_LET,
@@ -280,6 +281,11 @@ typedef enum _statement_kind {
 } statement_kind_t;
 
 typedef struct _statement statement_t;
+
+typedef struct _dim {
+    char name;
+    size_t size;
+} dim_t;
 
 typedef struct _input {
     vector_t *variables;
@@ -312,6 +318,7 @@ struct _statement {
     statement_kind_t kind;
     unsigned int line;
     union {
+        dim_t *dim;
         input_t *input;
         print_t *print;
         let_t *let;
@@ -334,6 +341,19 @@ void destroy_statement(statement_t *s);
 statement_t *create_end()
 {
     return _create_statement(S_END);
+}
+
+statement_t *create_dim(char name, size_t size)
+{
+    statement_t *st = _create_statement(S_DIM);
+    if( NULL != st ) {
+        st->dim = create_dim(name, size);
+        if( NULL == st->dim ) {
+            destroy_statement(st);
+            st = NULL;
+        }
+    }
+    return st;
 }
 
 statement_t *create_input(vector_t *vars)
@@ -419,6 +439,9 @@ statement_t *create_return()
 void destroy_statement(statement_t *s)
 {
     switch( s->kind ) {
+        case S_DIM:
+            free(s->dim);
+            break;
         case S_INPUT:
             destroy_vector_and_elements(s->input->variables, free);
             free(s->input);
@@ -466,6 +489,7 @@ typedef enum _token {
     T_STRING,
     T_NAME,
     T_END,
+    T_DIM,
     T_INPUT,
     T_PRINT,
     T_LET,
@@ -578,6 +602,7 @@ typedef struct _pair_of_text_and_token {
 
 const pair_of_text_and_token_t keywords[] = {
     {"END", T_END},
+    {"DIM", T_DIM},
     {"INPUT", T_INPUT},
     {"PRINT", T_PRINT},
     {"LET", T_LET},
@@ -587,13 +612,11 @@ const pair_of_text_and_token_t keywords[] = {
     {"GOSUB", T_GOSUB},
     {"RETURN", T_RETURN},
     {"REM", T_REM},
-
     {NULL, T_NONE}
 };
 
 const pair_of_text_and_token_t builtin_functions[] = {
     {"SQR", T_BUILTIN},
-
     {NULL, T_NONE}
 };
 
@@ -839,7 +862,7 @@ typedef struct _result {
 
 bool failed(const result_t *r)
 {
-    return R_OK != r->ec;
+    return R_OK != r->ec && NULL == r->item;
 }
 
 result_t result_with_ptr(void *p)
@@ -1061,6 +1084,16 @@ result_t parse_end(parser_t *parser)
     return result_with_ptr(create_end());
 }
 
+result_t parse_dim(parser_t* parser)
+{
+    match(parser, T_DIM);
+    match(parser, T_NAME);
+    match(parser, T_LPAR);
+    match(parser, T_INTEGER);
+    match(parser, T_RPAR);
+
+}
+
 result_t parse_input(parser_t *parser)
 {
     match(parser, T_INPUT);
@@ -1215,8 +1248,10 @@ result_t parse_line(parser_t *parser)
     statement_t *st = (statement_t *)rs.item;
     st->line = parser->line;
 
-    if( !match(parser, T_EOL) )
+    if( !match(parser, T_EOL) ) {
+        destroy_statement(rs.item);
         return result_with_error(R_MANDATORY_END_OF_LINE);
+    }
 
     return result_with_ptr(st);
 }
@@ -1243,16 +1278,45 @@ result_t parse(parser_t *parser)
 
 typedef enum _value_kind {
     V_NUMBER,
-    V_TEXT
+    V_TEXT,
+    V_ARRAY
 } value_kind_t;
+
+typedef struct _array array_t;
 
 typedef struct _value {
     value_kind_t kind;
     union {
         double real;
         char *text;
+        array_t *array;
     };
 } value_t;
+
+struct _array {
+    size_t size;
+    value_t **elements;
+};
+
+array_t *create_array(size_t sz)
+{
+    array_t *arr = malloc(sizeof(array_t));
+    if( NULL != arr ) {
+        arr->size = sz;
+        arr->elements = malloc(arr->size * sizeof(value_t));
+        if (NULL == arr->elements) {
+            free(arr);
+            arr = NULL;
+        }
+    }
+    return arr;
+}
+
+void destroy_array(array_t *arr)
+{
+    free(arr->elements);
+    free(arr);
+}
 
 typedef struct _interpreter {
     program_t *program;
