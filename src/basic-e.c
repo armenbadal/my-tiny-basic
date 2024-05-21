@@ -167,12 +167,15 @@ struct _expression {
 expression_t *_create_expression(expression_kind_t kind)
 {
     expression_t *ex = malloc(sizeof(expression_t));
-    if( NULL == ex ) return NULL;
-    ex->kind = kind;
+    if( NULL != ex )
+        ex->kind = kind;
     return ex;
 }
 
-void destroy_expression(expression_t *expr);
+void _destroy_expression(expression_t *expr)
+{
+    free(expr);
+}
 
 expression_t *create_number(double value)
 {
@@ -200,7 +203,7 @@ expression_t *create_unary(operation_t op, expression_t *se)
     expression_t *ex = _create_expression(E_UNARY);
     ex->unary = malloc(sizeof(unary_t));
     if( NULL == ex->unary ) {
-        destroy_expression(ex);
+        _destroy_expression(ex);
         return NULL;
     }
     ex->unary->operation = op;
@@ -213,7 +216,7 @@ expression_t *create_binary(operation_t op, expression_t *l, expression_t *r)
     expression_t *ex = _create_expression(E_BINARY);
     ex->binary = malloc(sizeof(binary_t));
     if( NULL == ex->binary ) {
-        destroy_expression(ex);
+        _destroy_expression(ex);
         return NULL;
     }
     ex->binary->operation = op;
@@ -227,13 +230,15 @@ expression_t *create_builtin_call(const char *name, vector_t *args)
     expression_t *ex = _create_expression(E_BUILTIN);
     ex->call = malloc(sizeof(builtin_t));
     if( NULL == ex->call ) {
-        destroy_expression(ex);
+        _destroy_expression(ex);
         return NULL;
     }
     strcpy(ex->call->name, name);
     ex->call->arguments = args;
     return ex;
 }
+
+void destroy_expression(expression_t *expr);
 
 void destroy_unary(unary_t *ue)
 {
@@ -256,6 +261,8 @@ void destroy_builtin(builtin_t *bi)
 
 void destroy_expression(expression_t *expr)
 {
+    if( NULL == expr ) return;
+
     if( E_STRING == expr->kind )
         free(expr->string);
     else if( E_UNARY == expr->kind )
@@ -264,6 +271,7 @@ void destroy_expression(expression_t *expr)
         destroy_binary(expr->binary);
     else if( E_BUILTIN == expr->kind )
         destroy_builtin(expr->call);
+
     free(expr);
 }
 
@@ -297,6 +305,7 @@ typedef struct _print {
 
 typedef struct _let {
     char variable;
+    expression_t *index;
     expression_t *right;
 } let_t;
 
@@ -331,12 +340,12 @@ struct _statement {
 statement_t *_create_statement(statement_kind_t kind)
 {
     statement_t *st = malloc(sizeof(statement_t));
-    if( NULL == st ) return NULL;
-    st->kind = kind;
+    if( NULL != st )
+        st->kind = kind;
     return st;
 }
 
-void destroy_statement(statement_t *s);
+#define _destroy_statement(st) free(st)
 
 statement_t *create_end()
 {
@@ -347,9 +356,9 @@ statement_t *create_dim(char name, size_t size)
 {
     statement_t *st = _create_statement(S_DIM);
     if( NULL != st ) {
-        st->dim = create_dim(name, size);
+        st->dim = malloc(sizeof(dim_t));
         if( NULL == st->dim ) {
-            destroy_statement(st);
+            _destroy_statement(st);
             st = NULL;
         }
     }
@@ -361,7 +370,7 @@ statement_t *create_input(vector_t *vars)
     statement_t *st = _create_statement(S_INPUT);
     st->input = malloc(sizeof(input_t));
     if( NULL == st->input ) {
-        destroy_statement(st);
+        _destroy_statement(st);
         return NULL;
     }
     st->input->variables = vars;
@@ -373,22 +382,23 @@ statement_t *create_print(vector_t *exprs)
     statement_t *st = _create_statement(S_PRINT);
     st->print = malloc(sizeof(print_t));
     if( NULL == st->print ) {
-        destroy_statement(st);
+        _destroy_statement(st);
         return NULL;
     }
     st->print->expressions = exprs;
     return st;
 }
 
-statement_t *create_let(char var, expression_t *expr)
+statement_t *create_let(char var, expression_t *inx, expression_t *expr)
 {
     statement_t *st = _create_statement(S_LET);
     st->let = malloc(sizeof(let_t));
     if( NULL == st->let ) {
-        destroy_statement(st);
+        _destroy_statement(st);
         return NULL;
     }
     st->let->variable = var;
+    st->let->index = inx;
     st->let->right = expr;
     return st;
 }
@@ -398,7 +408,7 @@ statement_t *create_if(expression_t *cond, statement_t *dec, statement_t *alt)
     statement_t *st = _create_statement(S_IF);
     st->ifc = malloc(sizeof(if_t));
     if( NULL == st->ifc ) {
-        destroy_statement(st);
+        _destroy_statement(st);
         return NULL;
     }
     st->ifc->condition = cond;
@@ -412,7 +422,7 @@ statement_t *create_goto(expression_t *tg)
     statement_t *st = _create_statement(S_GOTO);
     st->gotoc = malloc(sizeof(goto_t));
     if( NULL == st->gotoc ) {
-        destroy_statement(st);
+        _destroy_statement(st);
         return NULL;
     }
     st->gotoc->target = tg;
@@ -424,7 +434,7 @@ statement_t *create_gosub(expression_t *tg)
     statement_t *st = _create_statement(S_GOSUB);
     st->gosub = malloc(sizeof(gosub_t));
     if( NULL == st->gosub ) {
-        destroy_statement(st);
+        _destroy_statement(st);
         return NULL;
     }
     st->gosub->target = tg;
@@ -535,10 +545,14 @@ typedef struct _scanner {
 scanner_t *create_scanner(const char *file)
 {
     scanner_t *scanner = malloc(sizeof(scanner_t));
-    if( scanner == NULL ) return NULL;
+    if( scanner == NULL )
+        return NULL;
 
     FILE *fp = fopen(file, "r");
-    if( fp == NULL ) return NULL;
+    if( fp == NULL ) {
+        free(scanner);
+        return NULL;
+    }
 
     scanner->source = fp;
     scanner->ch = fgetc(scanner->source);
@@ -1137,6 +1151,17 @@ result_t parse_let(parser_t *parser)
     if( !match(parser, T_NAME) )
         return result_with_error(R_EXPECTED_NAME);
 
+    if( has(parser, T_LPAR) ) {
+        match(parser, T_LPAR);
+        result_t rie = parse_expression(parser);
+        if( failed(&rie) )
+            return rie;
+        if( !match(parser, T_RPAR) ) {
+            destroy_expression(rie.item);
+            return result_with_error(R_EXPECTET_RPAR);
+        }
+    }
+
     if( !match(parser, T_EQ) )
         return result_with_error(R_EXPECTED_EQ);
 
@@ -1513,6 +1538,8 @@ void execute_statement(interpreter_t *vi, const statement_t *s)
 {
     switch( s->kind ) {
         case S_END:
+            break;
+        case S_DIM:
             break;
         case S_INPUT:
             execute_input(vi, s->input);
