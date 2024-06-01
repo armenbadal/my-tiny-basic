@@ -116,12 +116,18 @@ typedef enum _expression_kind {
     E_NUMBER,
     E_STRING,
     E_VARIABLE,
+    E_SUBSCRIPT,
     E_UNARY,
     E_BINARY,
     E_BUILTIN
 } expression_kind_t;
 
 typedef struct _expression expression_t;
+
+typedef struct _subscript {
+    char name;
+    expression_t *index;
+} subscript_t;
 
 typedef enum _operation {
     ADD = 0,
@@ -158,6 +164,7 @@ struct _expression {
         double number;
         char name;
         char *string;
+        subscript_t *element;
         unary_t *unary;
         binary_t *binary;
         builtin_t *call;
@@ -195,6 +202,19 @@ expression_t *create_variable(char name)
 {
     expression_t *ex = _create_expression(E_VARIABLE);
     ex->name = name;
+    return ex;
+}
+
+expression_t* create_subscript(char name, expression_t* inx)
+{
+    expression_t *ex = _create_expression(E_SUBSCRIPT);
+    ex->element = malloc(sizeof(subscript_t));
+    if( NULL == ex->element ) {
+        _destroy_expression(ex);
+        return NULL;
+    }
+    ex->element->name = name;
+    ex->element->index = inx;
     return ex;
 }
 
@@ -240,6 +260,12 @@ expression_t *create_builtin_call(const char *name, vector_t *args)
 
 void destroy_expression(expression_t *expr);
 
+void destroy_subscript(subscript_t* ss)
+{
+    destroy_expression(ss->index);
+    free(ss);
+}
+
 void destroy_unary(unary_t *ue)
 {
     destroy_expression(ue->subexpr);
@@ -263,13 +289,15 @@ void destroy_expression(expression_t *expr)
 {
     if( NULL == expr ) return;
 
-    if( E_STRING == expr->kind )
+    if (E_STRING == expr->kind)
         free(expr->string);
-    else if( E_UNARY == expr->kind )
+    else if (E_SUBSCRIPT == expr->kind)
+        destroy_subscript(expr->element);
+    else if (E_UNARY == expr->kind)
         destroy_unary(expr->unary);
-    else if( E_BINARY == expr->kind )
+    else if (E_BINARY == expr->kind)
         destroy_binary(expr->binary);
-    else if( E_BUILTIN == expr->kind )
+    else if (E_BUILTIN == expr->kind)
         destroy_builtin(expr->call);
 
     free(expr);
@@ -778,7 +806,8 @@ typedef enum _error_code {
     R_EXPECTED_RELOP,
     R_EXPECTED_COMMAND,
     R_EXPECTET_LPAR,
-    R_EXPECTET_RPAR
+    R_EXPECTET_RPAR,
+    R_EXPECTED_NUMBER
 } error_code_t;
 
 const char *const error_message[] = {
@@ -792,6 +821,7 @@ const char *const error_message[] = {
     "Հրամանը պետք է սկսվի ծառայողական բառով",
     "Սպասվում է «(»",
     "Սպասվում է «)»",
+    "Սպասվում է թիվ",
     NULL
 };
 
@@ -896,7 +926,7 @@ result_t parse_name(parser_t *parser)
     char name = parser->lookahead.name[0];
     match(parser, T_NAME);
     expression_t *vr = create_variable(name);
-    return (result_t){ .item = vr, .ec = 0 };
+    return result_with_ptr(vr);
 }
 
 result_t parse_number(parser_t *parser)
@@ -904,7 +934,7 @@ result_t parse_number(parser_t *parser)
     double num = parser->lookahead.number;
     match_any(parser, 2, T_INTEGER, T_REAL);
     expression_t *nm = create_number(num);
-    return (result_t){ .item = nm, .ec = 0 };
+    return result_with_ptr(nm);
 }
 
 result_t parse_string(parser_t *parser)
@@ -912,7 +942,7 @@ result_t parse_string(parser_t *parser)
     char *str = parser->lookahead.string;
     match(parser, T_STRING);
     expression_t *es = create_string(str);
-    return (result_t){ .item = es, .ec = 0 };
+    return result_with_ptr(es);
 }
 
 result_t parse_expression_list(parser_t *parser)
@@ -1101,11 +1131,19 @@ result_t parse_end(parser_t *parser)
 result_t parse_dim(parser_t* parser)
 {
     match(parser, T_DIM);
-    match(parser, T_NAME);
-    match(parser, T_LPAR);
-    match(parser, T_INTEGER);
-    match(parser, T_RPAR);
 
+    char name = parser->lookahead.name[0];
+    if( !match(parser, T_NAME) )
+        return result_with_error(R_EXPECTED_NAME);
+    if( !match(parser, T_LPAR) )
+        return result_with_error(R_EXPECTET_LPAR);
+    size_t size = (size_t)parser->lookahead.number;
+    if( !match(parser, T_INTEGER) )
+        return result_with_error(R_EXPECTED_NUMBER);
+    if( !match(parser, T_RPAR) )
+        return result_with_error(R_EXPECTET_RPAR);
+
+    return result_with_ptr(create_dim(name, size));
 }
 
 result_t parse_input(parser_t *parser)
@@ -1151,6 +1189,7 @@ result_t parse_let(parser_t *parser)
     if( !match(parser, T_NAME) )
         return result_with_error(R_EXPECTED_NAME);
 
+    expression_t* inx = NULL;
     if( has(parser, T_LPAR) ) {
         match(parser, T_LPAR);
         result_t rie = parse_expression(parser);
@@ -1160,6 +1199,7 @@ result_t parse_let(parser_t *parser)
             destroy_expression(rie.item);
             return result_with_error(R_EXPECTET_RPAR);
         }
+        inx = rie.item;
     }
 
     if( !match(parser, T_EQ) )
@@ -1169,7 +1209,7 @@ result_t parse_let(parser_t *parser)
     if( failed(&rs) )
         return rs;
 
-    return result_with_ptr(create_let(name, rs.item));
+    return result_with_ptr(create_let(name, inx, rs.item));
 }
 
 result_t parse_if(parser_t *parser)
@@ -1303,25 +1343,21 @@ result_t parse(parser_t *parser)
 
 typedef enum _value_kind {
     V_NUMBER,
-    V_TEXT,
-    V_ARRAY
+    V_TEXT
 } value_kind_t;
-
-typedef struct _array array_t;
 
 typedef struct _value {
     value_kind_t kind;
     union {
         double real;
-        char *text;
-        array_t *array;
+        char* text;
     };
 } value_t;
 
-struct _array {
+typedef struct _array {
     size_t size;
     value_t **elements;
-};
+} array_t;
 
 array_t *create_array(size_t sz)
 {
@@ -1343,20 +1379,35 @@ void destroy_array(array_t *arr)
     free(arr);
 }
 
+typedef enum _symbol_kind {
+    S_SCALAR,
+    S_ARRAY
+} symbol_kind_t;
+
+typedef struct _symbol {
+    symbol_kind_t kind;
+    union {
+        value_t *scalar;
+        array_t *array;
+    };
+} symbol_t;
+
 typedef struct _interpreter {
     program_t *program;
     unsigned int pc;
-    value_t environment[26];
+    symbol_t environment[26];
     unsigned int stack[16+1];
 } interpreter_t;
 
 interpreter_t *create_interpreter(program_t *program)
 {
     interpreter_t *vi = malloc(sizeof(interpreter_t));
-    if( NULL == vi ) return NULL;
+    if( NULL == vi )
+        return NULL;
+
     vi->program = program;
     vi->pc = 0;
-    memset(vi->environment, 0, 26 * sizeof(double));
+    memset(vi->environment, 0, 26 * sizeof(symbol_t));
     memset(vi->stack, 0, (16+1) * sizeof(unsigned int)); // review this
     return vi;
 }
@@ -1447,7 +1498,7 @@ value_t evaluate_expression(interpreter_t *vi, expression_t *e)
             value.text = e->string;
             break;
         case E_VARIABLE:
-            value = vi->environment[index_of(e->name)];
+            value = *(vi->environment[index_of(e->name)].scalar);
             break;
         case E_UNARY:
             value = evaluate_unary(vi, e->unary);
@@ -1473,7 +1524,7 @@ void execute_input(interpreter_t *vi, const input_t *s)
         scanf("%lf", &value.real);
         const expression_t *ex = (expression_t *)(s->variables->items[i]);
         char name = ex->name;
-        vi->environment[index_of(name)] = value;
+        *(vi->environment[index_of(name)].scalar) = value;
     }
 }
 
@@ -1492,7 +1543,19 @@ void execute_print(interpreter_t *vi, const print_t *s)
 void execute_let(interpreter_t *vi, const let_t *s)
 {
     value_t val = evaluate_expression(vi, s->right);
-    vi->environment[index_of(s->variable)] = val;
+
+    symbol_t *sym = &vi->environment[index_of(s->variable)];
+
+    if( s->index == NULL ) {
+        if( NULL == sym->scalar )
+            sym->scalar = malloc(sizeof(value_t));
+        *(sym->scalar) = val;
+    }
+    else {
+        value_t vinx = evaluate_expression(vi, s->index);
+        size_t index = (size_t)vinx.real;
+        *(sym->array->elements[index]) = val;
+    }
 }
 
 void execute_if(interpreter_t *vi, const if_t *s)
@@ -1606,9 +1669,8 @@ void execute_file(const char *file)
     // interprete
     program = (program_t *)rs.item;
     interpreter = create_interpreter(program);
-    if( NULL == interpreter ) {
+    if( NULL == interpreter )
         goto cleanup;
-    }
 
     run(interpreter);
 
