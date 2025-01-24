@@ -6,3 +6,4 @@ set(CMAKE_C_STANDARD_REQUIRED true)
 project(basic LANGUAGES C)
 
 add_executable(${PROJECT_NAME} basic-e.c)
+target_link_libraries(${PROJECT_NAME} PUBLIC m)
