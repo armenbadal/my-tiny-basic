@@ -778,7 +778,8 @@ typedef enum _error_code {
     R_EXPECTED_RELOP,
     R_EXPECTED_COMMAND,
     R_EXPECTET_LPAR,
-    R_EXPECTET_RPAR
+    R_EXPECTET_RPAR,
+    R_EXPECTED_NUMBER
 } error_code_t;
 
 const char *const error_message[] = {
@@ -792,6 +793,7 @@ const char *const error_message[] = {
     "Հրամանը պետք է սկսվի ծառայողական բառով",
     "Սպասվում է «(»",
     "Սպասվում է «)»",
+    "Սպասվում է թիվ",
     NULL
 };
 
@@ -1098,14 +1100,25 @@ result_t parse_end(parser_t *parser)
     return result_with_ptr(create_end());
 }
 
+#define match_and_check(p, t, e) if(!match(p,t)) return result_with_error(e)
+
 result_t parse_dim(parser_t* parser)
 {
     match(parser, T_DIM);
-    match(parser, T_NAME);
-    match(parser, T_LPAR);
-    match(parser, T_INTEGER);
-    match(parser, T_RPAR);
 
+    char name = parser->lookahead.name[0];
+    if( !match(parser, T_NAME) )
+        return result_with_error(R_EXPECTED_NAME);
+
+    if( !match(parser, T_LPAR) )
+        return result_with_error(R_EXPECTET_LPAR);
+    size_t sz = (size_t)parser->lookahead.number;
+    if( match(parser, T_INTEGER) )
+        return result_with_error(R_EXPECTED_NUMBER);
+    if( !match(parser, T_RPAR) )
+        return result_with_error(R_EXPECTET_LPAR);
+
+    return result_with_ptr(create_dim(name, sz));
 }
 
 result_t parse_input(parser_t *parser)
@@ -1228,6 +1241,8 @@ result_t parse_statement(parser_t *parser)
     switch( parser->lookahead.token ) {
         case T_END:
             return parse_end(parser);
+        case T_DIM:
+            return parse_dim(parser);
         case T_INPUT:
             return parse_input(parser);
         case T_PRINT:
@@ -1465,6 +1480,11 @@ value_t evaluate_expression(interpreter_t *vi, expression_t *e)
 
 void execute_statement(interpreter_t *vi, const statement_t *s);
 
+void execute_dim(interpreter_t *vi, const dim_t *s)
+{
+
+}
+
 void execute_input(interpreter_t *vi, const input_t *s)
 {
     printf("? ");
@@ -1540,6 +1560,7 @@ void execute_statement(interpreter_t *vi, const statement_t *s)
         case S_END:
             break;
         case S_DIM:
+            execute_dim(vi, s->dim);
             break;
         case S_INPUT:
             execute_input(vi, s->input);
