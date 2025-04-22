@@ -116,6 +116,7 @@ typedef enum _expression_kind {
     E_NUMBER,
     E_STRING,
     E_VARIABLE,
+    E_SUBSCRIPT,
     E_UNARY,
     E_BINARY,
     E_BUILTIN
@@ -123,17 +124,22 @@ typedef enum _expression_kind {
 
 typedef struct _expression expression_t;
 
+typedef struct _subscript {
+    char name;
+    expression_t *index;
+} subscript_t;
+
 typedef enum _operation {
-    ADD = 0,
-    SUB,
-    MUL,
-    DIV,
-    EQ,
-    NE,
-    GT,
-    GE,
-    LT,
-    LE
+    O_ADD = 0,
+    O_SUB,
+    O_MUL,
+    O_DIV,
+    O_EQ,
+    O_NE,
+    O_GT,
+    O_GE,
+    O_LT,
+    O_LE
 } operation_t;
 
 typedef struct _unary {
@@ -158,6 +164,7 @@ struct _expression {
         double number;
         char name;
         char *string;
+        subscript_t *element;
         unary_t *unary;
         binary_t *binary;
         builtin_t *call;
@@ -195,6 +202,19 @@ expression_t *create_variable(char name)
 {
     expression_t *ex = _create_expression(E_VARIABLE);
     ex->name = name;
+    return ex;
+}
+
+expression_t* create_subscript(char name, expression_t* inx)
+{
+    expression_t *ex = _create_expression(E_SUBSCRIPT);
+    ex->element = malloc(sizeof(subscript_t));
+    if( NULL == ex->element ) {
+        _destroy_expression(ex);
+        return NULL;
+    }
+    ex->element->name = name;
+    ex->element->index = inx;
     return ex;
 }
 
@@ -240,6 +260,12 @@ expression_t *create_builtin_call(const char *name, vector_t *args)
 
 void destroy_expression(expression_t *expr);
 
+void destroy_subscript(subscript_t *ss)
+{
+    destroy_expression(ss->index);
+    free(ss);
+}
+
 void destroy_unary(unary_t *ue)
 {
     destroy_expression(ue->subexpr);
@@ -263,13 +289,15 @@ void destroy_expression(expression_t *expr)
 {
     if( NULL == expr ) return;
 
-    if( E_STRING == expr->kind )
+    if (E_STRING == expr->kind)
         free(expr->string);
-    else if( E_UNARY == expr->kind )
+    else if (E_SUBSCRIPT == expr->kind)
+        destroy_subscript(expr->element);
+    else if (E_UNARY == expr->kind)
         destroy_unary(expr->unary);
-    else if( E_BINARY == expr->kind )
+    else if (E_BINARY == expr->kind)
         destroy_binary(expr->binary);
-    else if( E_BUILTIN == expr->kind )
+    else if (E_BUILTIN == expr->kind)
         destroy_builtin(expr->call);
 
     free(expr);
@@ -580,7 +608,7 @@ void retreat(scanner_t *scanner)
     ungetc(scanner->ch, scanner->source);
 }
 
-void skip_until(scanner_t* scanner, char c)
+void skip_until(scanner_t *scanner, char c)
 {
     while( c != scanner->ch )
         advance(scanner);
@@ -667,7 +695,7 @@ lexeme_t scan_identifier_or_name(scanner_t *scanner)
     return (lexeme_t){ .token = T_NONE };
 }
 
-lexeme_t scan_string(scanner_t* scanner)
+lexeme_t scan_string(scanner_t *scanner)
 {
     advance(scanner);
 
@@ -777,8 +805,8 @@ typedef enum _error_code {
     R_EXPECTED_EQ,
     R_EXPECTED_RELOP,
     R_EXPECTED_COMMAND,
-    R_EXPECTET_LPAR,
-    R_EXPECTET_RPAR,
+    R_EXPECTED_LPAR,
+    R_EXPECTED_RPAR,
     R_EXPECTED_NUMBER
 } error_code_t;
 
@@ -898,7 +926,7 @@ result_t parse_name(parser_t *parser)
     char name = parser->lookahead.name[0];
     match(parser, T_NAME);
     expression_t *vr = create_variable(name);
-    return (result_t){ .item = vr, .ec = 0 };
+    return result_with_ptr(vr);
 }
 
 result_t parse_number(parser_t *parser)
@@ -906,7 +934,7 @@ result_t parse_number(parser_t *parser)
     double num = parser->lookahead.number;
     match_any(parser, 2, T_INTEGER, T_REAL);
     expression_t *nm = create_number(num);
-    return (result_t){ .item = nm, .ec = 0 };
+    return result_with_ptr(nm);
 }
 
 result_t parse_string(parser_t *parser)
@@ -914,7 +942,7 @@ result_t parse_string(parser_t *parser)
     char *str = parser->lookahead.string;
     match(parser, T_STRING);
     expression_t *es = create_string(str);
-    return (result_t){ .item = es, .ec = 0 };
+    return result_with_ptr(es);
 }
 
 result_t parse_expression_list(parser_t *parser)
@@ -948,7 +976,7 @@ result_t parse_builtin_call(parser_t *parser)
     match(parser, T_BUILTIN);
 
     if( !match(parser, T_LPAR) )
-        return result_with_error(R_EXPECTET_LPAR);
+        return result_with_error(R_EXPECTED_LPAR);
 
     result_t rel = parse_expression_list(parser);
     if( failed(&rel) )
@@ -958,7 +986,7 @@ result_t parse_builtin_call(parser_t *parser)
 
     if( !match(parser, T_RPAR) ) {
         destroy_vector_and_elements(args, (action_t)&destroy_expression);
-        return result_with_error(R_EXPECTET_RPAR);
+        return result_with_error(R_EXPECTED_RPAR);
     }
 
     expression_t *bic = create_builtin_call(name, args);
@@ -969,7 +997,7 @@ result_t parse_parenthesed(parser_t *parser)
 {
     match(parser, T_LPAR);
     result_t rs = parse_expression(parser);
-    if( rs.ec != R_OK )
+    if( failed(&rs) )
         return rs;
     if( !match(parser, T_RPAR) ) {
         destroy_expression(rs.item);
@@ -995,20 +1023,20 @@ result_t parse_factor(parser_t *parser)
     if( has(parser, T_LPAR) )
         return parse_parenthesed(parser);
 
-    return (result_t){ .item = NULL, .ec = 0 };
+    return result_with_error(R_OK);
 }
 
 result_t parse_term(parser_t *parser)
 {
     result_t rs = parse_factor(parser);
-    if( rs.ec != R_OK )
+    if( failed(&rs) )
         return rs;
 
     while( has_any_of(parser, 2, T_MUL, T_DIV) ) {
-        operation_t oper = T_DIV == parser->lookahead.token ? DIV : MUL;
+        operation_t oper = T_DIV == parser->lookahead.token ? O_DIV : O_MUL;
         match_any(parser, 2, T_MUL, T_DIV);
         result_t r2 = parse_factor(parser);
-        if( r2.ec != R_OK )
+        if( failed(&r2) )
             return r2;
         rs.item = create_binary(oper, rs.item, r2.item);
     }
@@ -1018,11 +1046,11 @@ result_t parse_term(parser_t *parser)
 
 result_t parse_expression(parser_t *parser)
 {
-    operation_t unop = ADD;
+    operation_t unop = O_ADD;
     if( has(parser, T_ADD) )
         match(parser, T_ADD);
     else if( has(parser, T_SUB) ) {
-        unop = SUB;
+        unop = O_SUB;
         match(parser, T_SUB);
     }
 
@@ -1030,11 +1058,11 @@ result_t parse_expression(parser_t *parser)
     if( failed(&rs) )
         return rs;
     
-    if( SUB == unop )
+    if( O_SUB == unop )
         rs.item = create_unary(unop, rs.item);
 
     while( has_any_of(parser, 2, T_ADD, T_SUB) ) {
-        operation_t oper = T_ADD == parser->lookahead.token ? ADD : SUB;
+        operation_t oper = T_ADD == parser->lookahead.token ? O_ADD : O_SUB;
         match_any(parser, 2, T_ADD, T_SUB);
         result_t r2 = parse_term(parser);
         if( failed(&r2) ) {
@@ -1058,25 +1086,25 @@ result_t parse_comparison(parser_t *parser)
         destroy_expression(rl.item);
         return result_with_error(R_EXPECTED_RELOP);
     }
-    operation_t oper = EQ;
+    operation_t oper = O_EQ;
     switch( token ) {
         case T_EQ:
-            oper = EQ;
+            oper = O_EQ;
             break;
         case T_NE:
-            oper = NE;
+            oper = O_NE;
             break;
         case T_GT:
-            oper = GT;
+            oper = O_GT;
             break;
         case T_GE:
-            oper = GE;
+            oper = O_GE;
             break;
         case T_LT:
-            oper = LT;
+            oper = O_LT;
             break;
         case T_LE:
-            oper = LE;
+            oper = O_LE;
             break;
         default:
             break;
@@ -1164,6 +1192,7 @@ result_t parse_let(parser_t *parser)
     if( !match(parser, T_NAME) )
         return result_with_error(R_EXPECTED_NAME);
 
+    expression_t *inx = NULL;
     if( has(parser, T_LPAR) ) {
         match(parser, T_LPAR);
         result_t rie = parse_expression(parser);
@@ -1171,8 +1200,9 @@ result_t parse_let(parser_t *parser)
             return rie;
         if( !match(parser, T_RPAR) ) {
             destroy_expression(rie.item);
-            return result_with_error(R_EXPECTET_RPAR);
+            return result_with_error(R_EXPECTED_RPAR);
         }
+        inx = rie.item;
     }
 
     if( !match(parser, T_EQ) )
@@ -1182,7 +1212,7 @@ result_t parse_let(parser_t *parser)
     if( failed(&rs) )
         return rs;
 
-    return result_with_ptr(create_let(name, rs.item));
+    return result_with_ptr(create_let(name, inx, rs.item));
 }
 
 result_t parse_if(parser_t *parser)
@@ -1208,7 +1238,7 @@ result_t parse_if(parser_t *parser)
     return result_with_ptr(st);
 }
 
-result_t parse_goto(parser_t* parser)
+result_t parse_goto(parser_t *parser)
 {
     match(parser, T_GOTO);
 
@@ -1219,7 +1249,7 @@ result_t parse_goto(parser_t* parser)
     return result_with_ptr(create_goto(rs.item));
 }
 
-result_t parse_gosub(parser_t* parser)
+result_t parse_gosub(parser_t *parser)
 {
     match(parser, T_GOSUB);
 
@@ -1230,7 +1260,7 @@ result_t parse_gosub(parser_t* parser)
     return result_with_ptr(create_gosub(rs.item));
 }
 
-result_t parse_return(parser_t* parser)
+result_t parse_return(parser_t *parser)
 {
     match(parser, T_RETURN);
     return result_with_ptr(create_return());
@@ -1318,25 +1348,21 @@ result_t parse(parser_t *parser)
 
 typedef enum _value_kind {
     V_NUMBER,
-    V_TEXT,
-    V_ARRAY
+    V_TEXT
 } value_kind_t;
-
-typedef struct _array array_t;
 
 typedef struct _value {
     value_kind_t kind;
     union {
         double real;
         char *text;
-        array_t *array;
     };
 } value_t;
 
-struct _array {
+typedef struct _array {
     size_t size;
     value_t **elements;
-};
+} array_t;
 
 array_t *create_array(size_t sz)
 {
@@ -1358,20 +1384,35 @@ void destroy_array(array_t *arr)
     free(arr);
 }
 
+typedef enum _symbol_kind {
+    S_SCALAR,
+    S_ARRAY
+} symbol_kind_t;
+
+typedef struct _symbol {
+    symbol_kind_t kind;
+    union {
+        value_t *scalar;
+        array_t *array;
+    };
+} symbol_t;
+
 typedef struct _interpreter {
     program_t *program;
     unsigned int pc;
-    value_t environment[26];
+    symbol_t environment[26];
     unsigned int stack[16+1];
 } interpreter_t;
 
 interpreter_t *create_interpreter(program_t *program)
 {
     interpreter_t *vi = malloc(sizeof(interpreter_t));
-    if( NULL == vi ) return NULL;
+    if( NULL == vi )
+        return NULL;
+
     vi->program = program;
     vi->pc = 0;
-    memset(vi->environment, 0, 26 * sizeof(double));
+    memset(vi->environment, 0, 26 * sizeof(symbol_t));
     memset(vi->stack, 0, (16+1) * sizeof(unsigned int)); // review this
     return vi;
 }
@@ -1386,7 +1427,7 @@ value_t evaluate_expression(interpreter_t *vi, expression_t *e);
 value_t evaluate_unary(interpreter_t *vi, unary_t *e)
 {
     value_t value = evaluate_expression(vi, e->subexpr);
-    if( value.kind == V_NUMBER && e->operation == SUB )
+    if( value.kind == V_NUMBER && e->operation == O_SUB )
         value.real *= -1;
     return value;
 }
@@ -1398,34 +1439,34 @@ value_t evaluate_binary(interpreter_t *vi, binary_t *e)
 
     value_t value = { .kind = V_NUMBER, .real = 0.0 };
     switch( e->operation ) {
-        case ADD:
+        case O_ADD:
             value.real = vleft.real + vright.real;
             break;
-        case SUB:
+        case O_SUB:
             value.real = vleft.real - vright.real;
             break;
-        case MUL:
+        case O_MUL:
             value.real = vleft.real * vright.real;
             break;
-        case DIV:
+        case O_DIV:
             value.real = vleft.real / vright.real;
             break;
-        case EQ:
+        case O_EQ:
             value.real = fabs(vleft.real - vright.real) < DBL_EPSILON;
             break;
-        case NE:
+        case O_NE:
             value.real = fabs(vleft.real - vright.real) >= DBL_EPSILON;
             break;
-        case GT:
+        case O_GT:
             value.real = vleft.real > vright.real;
             break;
-        case GE:
+        case O_GE:
             value.real = vleft.real >= vright.real;
             break;
-        case LT:
+        case O_LT:
             value.real = vleft.real < vright.real;
             break;
-        case LE: 
+        case O_LE: 
             value.real = vleft.real <= vright.real;
             break;
     }
@@ -1462,7 +1503,7 @@ value_t evaluate_expression(interpreter_t *vi, expression_t *e)
             value.text = e->string;
             break;
         case E_VARIABLE:
-            value = vi->environment[index_of(e->name)];
+            value = *(vi->environment[index_of(e->name)].scalar);
             break;
         case E_UNARY:
             value = evaluate_unary(vi, e->unary);
@@ -1494,7 +1535,7 @@ void execute_input(interpreter_t *vi, const input_t *s)
         scanf("%lf", &value.real);
         const expression_t *ex = (expression_t *)(s->variables->items[i]);
         char name = ex->name;
-        vi->environment[index_of(name)] = value;
+        *(vi->environment[index_of(name)].scalar) = value;
     }
 }
 
@@ -1513,7 +1554,19 @@ void execute_print(interpreter_t *vi, const print_t *s)
 void execute_let(interpreter_t *vi, const let_t *s)
 {
     value_t val = evaluate_expression(vi, s->right);
-    vi->environment[index_of(s->variable)] = val;
+
+    symbol_t *sym = &vi->environment[index_of(s->variable)];
+
+    if( s->index == NULL ) {
+        if( NULL == sym->scalar )
+            sym->scalar = malloc(sizeof(value_t));
+        *(sym->scalar) = val;
+    }
+    else {
+        value_t vinx = evaluate_expression(vi, s->index);
+        size_t index = (size_t)vinx.real;
+        *(sym->array->elements[index]) = val;
+    }
 }
 
 void execute_if(interpreter_t *vi, const if_t *s)
@@ -1523,7 +1576,7 @@ void execute_if(interpreter_t *vi, const if_t *s)
         execute_statement(vi, s->decision);
 }
 
-int search_program_line(const interpreter_t* vi, unsigned int line)
+int search_program_line(const interpreter_t *vi, unsigned int line)
 {
     for(int i = 0; i < vi->program->count; ++i) {
         const statement_t *s = vi->program->items[i];
@@ -1628,9 +1681,8 @@ void execute_file(const char *file)
     // interprete
     program = (program_t *)rs.item;
     interpreter = create_interpreter(program);
-    if( NULL == interpreter ) {
+    if( NULL == interpreter )
         goto cleanup;
-    }
 
     run(interpreter);
 
