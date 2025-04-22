@@ -1482,7 +1482,8 @@ void execute_statement(interpreter_t *vi, const statement_t *s);
 
 void execute_dim(interpreter_t *vi, const dim_t *s)
 {
-
+    array_t *arr = create_array(s->size);
+    vi->environment[index_of(s->name)] = (value_t){ .kind = V_ARRAY, .array = arr };;
 }
 
 void execute_input(interpreter_t *vi, const input_t *s)
