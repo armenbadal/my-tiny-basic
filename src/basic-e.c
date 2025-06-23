@@ -1128,22 +1128,25 @@ result_t parse_end(parser_t *parser)
     return result_with_ptr(create_end());
 }
 
-result_t parse_dim(parser_t *parser)
+#define match_and_check(p, t, e) if(!match(p,t)) return result_with_error(e)
+
+result_t parse_dim(parser_t* parser)
 {
     match(parser, T_DIM);
 
     char name = parser->lookahead.name[0];
     if( !match(parser, T_NAME) )
         return result_with_error(R_EXPECTED_NAME);
+
     if( !match(parser, T_LPAR) )
-        return result_with_error(R_EXPECTED_LPAR);
-    size_t size = (size_t)parser->lookahead.number;
-    if( !match(parser, T_INTEGER) )
+        return result_with_error(R_EXPECTET_LPAR);
+    size_t sz = (size_t)parser->lookahead.number;
+    if( match(parser, T_INTEGER) )
         return result_with_error(R_EXPECTED_NUMBER);
     if( !match(parser, T_RPAR) )
-        return result_with_error(R_EXPECTED_RPAR);
+        return result_with_error(R_EXPECTET_LPAR);
 
-    return result_with_ptr(create_dim(name, size));
+    return result_with_ptr(create_dim(name, sz));
 }
 
 result_t parse_input(parser_t *parser)
@@ -1268,6 +1271,8 @@ result_t parse_statement(parser_t *parser)
     switch( parser->lookahead.token ) {
         case T_END:
             return parse_end(parser);
+        case T_DIM:
+            return parse_dim(parser);
         case T_INPUT:
             return parse_input(parser);
         case T_PRINT:
@@ -1518,7 +1523,8 @@ void execute_statement(interpreter_t *vi, const statement_t *s);
 
 void execute_dim(interpreter_t *vi, const dim_t *s)
 {
-    symbol_t *sym = &vi->environment[index_of(s->name)];
+    array_t *arr = create_array(s->size);
+    vi->environment[index_of(s->name)] = (value_t){ .kind = V_ARRAY, .array = arr };;
 }
 
 void execute_input(interpreter_t *vi, const input_t *s)
