@@ -53,7 +53,7 @@ vector_t *create_vector(size_t cap)
 
 bool is_empty(const vector_t *vec)
 {
-    return vec->count > 0;
+    return vec->count == 0;
 }
 
 void *get_elem(const vector_t *vec, size_t index)
@@ -289,15 +289,15 @@ void destroy_expression(expression_t *expr)
 {
     if( NULL == expr ) return;
 
-    if (E_STRING == expr->kind)
+    if( E_STRING == expr->kind )
         free(expr->string);
-    else if (E_SUBSCRIPT == expr->kind)
+    else if( E_SUBSCRIPT == expr->kind )
         destroy_subscript(expr->element);
-    else if (E_UNARY == expr->kind)
+    else if( E_UNARY == expr->kind )
         destroy_unary(expr->unary);
-    else if (E_BINARY == expr->kind)
+    else if( E_BINARY == expr->kind )
         destroy_binary(expr->binary);
-    else if (E_BUILTIN == expr->kind)
+    else if( E_BUILTIN == expr->kind )
         destroy_builtin(expr->call);
 
     free(expr);
@@ -505,7 +505,7 @@ void destroy_statement(statement_t *s)
             break;
         case S_GOSUB:
             destroy_expression(s->gosub->target);
-            free(s->gotoc);
+            free(s->gosub);
             break;
         case S_END:
         case S_RETURN:
@@ -708,7 +708,7 @@ lexeme_t scan_string(scanner_t *scanner)
     }
     advance(scanner);
 
-    lexeme_t str= {
+    lexeme_t str = {
         .token = T_STRING,
         .string = malloc(1 + strlen(buffer))
     };
@@ -1364,8 +1364,8 @@ array_t *create_array(size_t sz)
     array_t *arr = malloc(sizeof(array_t));
     if( NULL != arr ) {
         arr->size = sz;
-        arr->elements = malloc(arr->size * sizeof(value_t));
-        if (NULL == arr->elements) {
+        arr->elements = malloc(arr->size * sizeof(value_t *));
+        if( NULL == arr->elements ) {
             free(arr);
             arr = NULL;
         }
@@ -1516,6 +1516,11 @@ value_t evaluate_expression(interpreter_t *vi, expression_t *e)
 
 void execute_statement(interpreter_t *vi, const statement_t *s);
 
+void execute_dim(interpreter_t *vi, const dim_t *s)
+{
+    symbol_t *sym = &vi->environment[index_of(s->name)];
+}
+
 void execute_input(interpreter_t *vi, const input_t *s)
 {
     printf("? ");
@@ -1603,6 +1608,7 @@ void execute_statement(interpreter_t *vi, const statement_t *s)
         case S_END:
             break;
         case S_DIM:
+            execute_dim(vi, s->dim);
             break;
         case S_INPUT:
             execute_input(vi, s->input);
