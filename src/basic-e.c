@@ -1139,12 +1139,12 @@ result_t parse_dim(parser_t* parser)
         return result_with_error(R_EXPECTED_NAME);
 
     if( !match(parser, T_LPAR) )
-        return result_with_error(R_EXPECTET_LPAR);
+        return result_with_error(R_EXPECTED_LPAR);
     size_t sz = (size_t)parser->lookahead.number;
     if( match(parser, T_INTEGER) )
         return result_with_error(R_EXPECTED_NUMBER);
     if( !match(parser, T_RPAR) )
-        return result_with_error(R_EXPECTET_LPAR);
+        return result_with_error(R_EXPECTED_LPAR);
 
     return result_with_ptr(create_dim(name, sz));
 }
@@ -1348,7 +1348,8 @@ result_t parse(parser_t *parser)
 
 typedef enum _value_kind {
     V_NUMBER,
-    V_TEXT
+    V_TEXT,
+    V_ARRAY
 } value_kind_t;
 
 typedef struct _value {
@@ -1356,6 +1357,7 @@ typedef struct _value {
     union {
         double real;
         char *text;
+        array_t *array;
     };
 } value_t;
 
@@ -1524,7 +1526,7 @@ void execute_statement(interpreter_t *vi, const statement_t *s);
 void execute_dim(interpreter_t *vi, const dim_t *s)
 {
     array_t *arr = create_array(s->size);
-    vi->environment[index_of(s->name)] = (value_t){ .kind = V_ARRAY, .array = arr };;
+    //vi->environment[index_of(s->name)] = (value_t){ .kind = V_ARRAY, .array = arr };
 }
 
 void execute_input(interpreter_t *vi, const input_t *s)
